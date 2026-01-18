@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # MongoDB - Primary Database
+  mongo:
+    image: mongo:6.0
+    container_name: genio_mongo
+    restart: unless-stopped
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password123
+
+  # Redis - Job Queue Broker
+  redis:
+    image: redis:7.0-alpine
+    container_name: genio_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # AI Worker - Python + Node
+  worker:
+    build: ./worker
+    container_name: genio_worker
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - mongo
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MONGO_URI: mongodb://admin:password123@mongo:27017/genio?authSource=admin
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-genio-videos}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      HF_TOKEN: ${HF_TOKEN}
+      # Memory optimization for Python
+      OMP_NUM_THREADS: 1
+      MKL_NUM_THREADS: 1
+      NUMEXPR_NUM_THREADS: 1
+    volumes:
+      - ./worker/src:/app/src # Mount TypeScript source for dev
+      - ./worker/python:/app/python # Mount python scripts for dev
+      - ./client/public/subtitles:/app/subtitles # Mount local subtitles folder for direct download
+      - ./server/uploads:/app/server-uploads # Mount server uploads so worker can access local files
+    # Memory limits - increase if you have more RAM available
+    mem_limit: 16g
+    memswap_limit: 20g
+    # OOM killer settings
+    oom_kill_disable: false
+    oom_score_adj: 0
+
+volumes:
+  mongo_data:
+  redis_data:
+
+
+networks:
+  default:
+    driver: bridge

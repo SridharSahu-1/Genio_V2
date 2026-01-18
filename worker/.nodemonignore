@@ -1,0 +1,3 @@
+# Ignore all files - local worker should not run
+# Use Docker worker instead: docker-compose up worker
+*
