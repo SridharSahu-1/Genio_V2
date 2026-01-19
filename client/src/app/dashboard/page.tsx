@@ -205,12 +205,15 @@ export default function Dashboard() {
   return (
     <div className="p-8">
       {playingVideo ? (
-        <div className="mb-8">
+        <div className="mb-8 animate-fadeIn">
           <VideoPlayer
             videoUrl={playingVideo.videoUrl}
             subtitleUrl={playingVideo.subtitleUrl}
             title={playingVideo.title}
-            onClose={() => setPlayingVideo(null)}
+            onClose={() => {
+              // Animation will be handled by the component
+              setPlayingVideo(null);
+            }}
           />
         </div>
       ) : (

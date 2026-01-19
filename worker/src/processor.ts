@@ -124,6 +124,11 @@ export const processVideo = async (job: Job) => {
   const tempDir = path.resolve(__dirname, '../temp');
   if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
   
+  // Log temp directory for debugging
+  console.log(`📁 Temp directory: ${tempDir}`);
+  console.log(`📁 Temp directory exists: ${fs.existsSync(tempDir)}`);
+  console.log(`📁 Temp directory absolute: ${path.resolve(tempDir)}`);
+  
   // Cleanup old temp files (older than 1 hour) to prevent disk space issues
   try {
     const now = Date.now();
@@ -170,60 +175,80 @@ export const processVideo = async (job: Job) => {
     console.log(`✅ Local file path provided`);
     console.log(`   Original path: ${videoUrl}`);
     
+    // Check if we're running in Docker
+    const isDocker = fs.existsSync('/.dockerenv') || process.env.REDIS_HOST === 'redis';
+    console.log(`   Running in Docker: ${isDocker ? 'YES ✅' : 'NO (local)'}`);
+    
     // Map server path to Docker mount path
     // Server saves to: /path/to/server/uploads/filename.mp4
     // Docker mount: /app/server-uploads/filename.mp4
     let actualPath = videoUrl;
     const filename = path.basename(videoUrl) || `video-${videoId || Date.now()}.mp4`;
+    const dockerPath = path.join('/app/server-uploads', filename);
     
     console.log(`   🔍 Looking for file:`);
     console.log(`      Original path: ${videoUrl}`);
     console.log(`      Extracted filename: ${filename}`);
     
-    // Try Docker mount path first (most likely location)
-    const dockerPath = path.join('/app/server-uploads', filename);
+    // Try Docker mount path if in Docker, otherwise try original path first
     console.log(`      Docker mount path: ${dockerPath}`);
     
-    // List all files in Docker mount for debugging
-    try {
-      const allFiles = fs.readdirSync('/app/server-uploads');
-      console.log(`      Files in Docker mount (${allFiles.length} total):`, allFiles.slice(-5).join(', '));
-    } catch (err) {
-      console.warn(`      Could not list Docker mount directory: ${err}`);
-    }
-    
-    if (fs.existsSync(dockerPath)) {
-      actualPath = dockerPath;
-      console.log(`   ✅ Found in Docker mount: ${actualPath}`);
-    } else if (fs.existsSync(videoUrl)) {
-      actualPath = videoUrl;
-      console.log(`   ✅ Found at original path: ${actualPath}`);
-    } else {
-      // Try to find file by matching timestamp or user ID from filename
-      // Filename format: {userId}-{timestamp}-{originalName}
+    if (isDocker) {
+      // In Docker: try Docker mount path first (volume mount)
+      // List all files in Docker mount for debugging
       try {
         const allFiles = fs.readdirSync('/app/server-uploads');
-        const matchingFiles = allFiles.filter(f => 
-          f.includes(filename.split('-')[0]) || // Match user ID
-          f.endsWith(path.extname(filename)) || // Match extension
-          f.includes(path.basename(filename, path.extname(filename))) // Match base name
-        );
-        
-        if (matchingFiles.length > 0) {
-          console.log(`   🔍 Found ${matchingFiles.length} potential matches:`, matchingFiles.slice(0, 3).join(', '));
-          // Try the most recent match
-          const matchedPath = path.join('/app/server-uploads', matchingFiles[matchingFiles.length - 1]);
-          if (fs.existsSync(matchedPath)) {
-            actualPath = matchedPath;
-            console.log(`   ✅ Using matched file: ${actualPath}`);
-          }
-        }
+        console.log(`      Files in Docker mount (${allFiles.length} total):`, allFiles.slice(-5).join(', '));
       } catch (err) {
-        console.warn(`   ⚠️  Could not search for matching files: ${err}`);
+        console.warn(`      Could not list Docker mount directory: ${err}`);
       }
       
-      // Final check
-      if (!fs.existsSync(actualPath)) {
+      if (fs.existsSync(dockerPath)) {
+        actualPath = dockerPath;
+        console.log(`   ✅ Found in Docker mount: ${actualPath}`);
+      } else if (fs.existsSync(videoUrl)) {
+        actualPath = videoUrl;
+        console.log(`   ✅ Found at original path: ${actualPath}`);
+      } else {
+        // Try to find file by matching timestamp or user ID from filename
+        // Filename format: {userId}-{timestamp}-{originalName}
+        try {
+          const allFiles = fs.readdirSync('/app/server-uploads');
+          const matchingFiles = allFiles.filter(f => 
+            f.includes(filename.split('-')[0]) || // Match user ID
+            f.endsWith(path.extname(filename)) || // Match extension
+            f.includes(path.basename(filename, path.extname(filename))) // Match base name
+          );
+          
+          if (matchingFiles.length > 0) {
+            console.log(`   🔍 Found ${matchingFiles.length} potential matches:`, matchingFiles.slice(0, 3).join(', '));
+            // Try the most recent match
+            const matchedPath = path.join('/app/server-uploads', matchingFiles[matchingFiles.length - 1]);
+            if (fs.existsSync(matchedPath)) {
+              actualPath = matchedPath;
+              console.log(`   ✅ Using matched file: ${actualPath}`);
+            }
+          }
+        } catch (err) {
+          console.warn(`   ⚠️  Could not search for matching files: ${err}`);
+        }
+      }
+    } else {
+      // NOT in Docker: try original path first
+      if (fs.existsSync(videoUrl)) {
+        actualPath = videoUrl;
+        console.log(`   ✅ Found at original path (local): ${actualPath}`);
+      } else {
+        // Try Docker path as fallback (in case config is wrong)
+        if (fs.existsSync(dockerPath)) {
+          actualPath = dockerPath;
+          console.log(`   ✅ Found in Docker mount (unexpected): ${actualPath}`);
+        }
+      }
+    }
+    
+    // Final check
+    if (!fs.existsSync(actualPath)) {
         // Try alternative paths
         const altPaths = [
           dockerPath,
@@ -269,7 +294,6 @@ export const processVideo = async (job: Job) => {
           }
         }
       }
-    }
     
     const fileSize = fs.statSync(actualPath).size;
     console.log(`✅ Local file verified: ${fileSize} bytes`);
@@ -406,12 +430,24 @@ export const processVideo = async (job: Job) => {
     
     // Use local file (already downloaded from S3 using AWS credentials)
     console.log(`📁 Using local file (downloaded from S3): ${localVideoPath}`);
-      pythonArgs.push('--input', localVideoPath);
+    pythonArgs.push('--input', localVideoPath);
     pythonArgs.push('--token', hfToken);
     pythonArgs.push('--output_dir', tempDir);
     
     console.log(`Python command: ${pythonCmd} ${scriptPath} --input ${localVideoPath} --token [TOKEN] --output_dir ${tempDir}`);
-    const pythonProcess = spawn(pythonCmd, pythonArgs);
+    // Set environment variables for Python subprocess to match standalone execution
+    const pythonEnv = {
+      ...process.env,
+      PYTHONUNBUFFERED: '1',  // Ensure Python output is unbuffered
+      OMP_NUM_THREADS: '1',   // Limit OpenMP threads to avoid conflicts
+      MKL_NUM_THREADS: '1',   // Limit MKL threads
+      NUMEXPR_NUM_THREADS: '1', // Limit NumExpr threads
+    };
+    
+    const pythonProcess = spawn(pythonCmd, pythonArgs, {
+      env: pythonEnv,
+      cwd: path.resolve(__dirname, '../../'), // Set working directory to worker root
+    });
 
     pythonProcess.stdout.on('data', (data) => {
       const output = data.toString().trim();
@@ -469,22 +505,9 @@ export const processVideo = async (job: Job) => {
         let exitMsg: string;
         if (code === null) {
           if (signal === 'SIGSEGV') {
-            // Check if running in Docker - multiple ways to detect
-            const redisHost = process.env.REDIS_HOST || '';
-            const isDocker = redisHost === 'redis' || 
-                           redisHost.includes('redis') || 
-                           process.env.HOSTNAME?.includes('worker') ||
-                           fs.existsSync('/.dockerenv');
-            
-            console.log(`🔍 Docker detection - REDIS_HOST: ${redisHost}, HOSTNAME: ${process.env.HOSTNAME}, isDocker: ${isDocker}`);
-            
-            if (isDocker) {
-              exitMsg = `Python script crashed with SIGSEGV (segmentation fault) in Docker. This may indicate:\n   1. Memory issues (check Docker memory limits - currently 16GB)\n   2. Corrupted Python dependencies\n   3. Video file corruption\n   4. PyTorch version mismatch (2.8.0 vs 2.1.2 expected)\n   Check Docker logs: docker-compose logs worker`;
-            } else {
-              exitMsg = `Python script crashed with SIGSEGV (segmentation fault). This is a known issue with faster-whisper/ctranslate2 on macOS. Use Docker worker instead: docker-compose up worker`;
-            }
+            exitMsg = `Python script crashed with SIGSEGV (segmentation fault). This is a known issue with faster-whisper/ctranslate2 on macOS.\n   Possible solutions:\n   1. Try a smaller video file\n   2. Check Python dependencies: pip install --upgrade whisperx faster-whisper\n   3. Try using a different model size (currently using 'small')\n   4. Check system memory availability\n   5. Ensure you're using the correct Python version (3.11 recommended)`;
           } else if (signal === 'SIGKILL') {
-            exitMsg = `Python script was killed (OOM - out of memory). Try increasing Docker memory limits or reduce video size.`;
+            exitMsg = `Python script was killed (OOM - out of memory). Try reducing video size or freeing up system memory.`;
           } else {
             exitMsg = `Python script crashed/killed (Signal: ${signal}). Check memory and dependencies.`;
           }
@@ -530,21 +553,33 @@ export const processVideo = async (job: Job) => {
       
       // Find ASS file - Python script generates files like: {base_name}_{detected_lang}.ass
       // The base_name is derived from the downloaded video filename
-      const files = fs.readdirSync(tempDir);
-      console.log(`📁 Files in temp directory: ${files.join(', ')}`);
+      console.log(`📁 Looking for ASS files in: ${tempDir}`);
+      console.log(`📁 Temp directory exists: ${fs.existsSync(tempDir)}`);
+      
+      let files: string[] = [];
+      try {
+        files = fs.readdirSync(tempDir);
+        console.log(`📁 Files in temp directory (${files.length} total): ${files.join(', ') || 'NONE'}`);
+      } catch (err: any) {
+        console.error(`❌ Error reading temp directory: ${err.message}`);
+        throw new Error(`Cannot read temp directory: ${tempDir}`);
+      }
       
       // Look for .ass files - Python generates them with the pattern {base_name}_{lang}.ass
       // But since we're using presigned URLs, the filename might not match exactly
       // So we'll find ANY .ass file in the temp directory
       const assFiles = files.filter(f => f.endsWith('.ass'));
-      console.log(`🔍 Found ${assFiles.length} ASS file(s): ${assFiles.join(', ')}`);
+      console.log(`🔍 Found ${assFiles.length} ASS file(s): ${assFiles.join(', ') || 'NONE'}`);
       
       if (assFiles.length === 0) {
         // List all files for debugging
         console.error(`❌ No ASS file found in temp directory`);
         console.error(`   Temp directory: ${tempDir}`);
+        console.error(`   Temp directory absolute: ${path.resolve(tempDir)}`);
         console.error(`   All files: ${files.join(', ') || 'NONE'}`);
-        throw new Error('No subtitle file (.ass) was generated by Python script');
+        console.error(`   This usually means the Python script crashed before generating the subtitle file.`);
+        console.error(`   Check the Python output above for SIGSEGV or other errors.`);
+        throw new Error('No subtitle file (.ass) was generated by Python script. The script likely crashed during transcription.');
       }
       
       let subtitleKey: string | null = null;
@@ -584,24 +619,32 @@ export const processVideo = async (job: Job) => {
         throw new Error('No subtitle file generated by Python script');
       }
 
-      // Cleanup local files
-      try {
-        if (fs.existsSync(localVideoPath)) {
-          fs.unlinkSync(localVideoPath);
-          console.log(`🧹 Cleaned up video file: ${localVideoPath}`);
-        }
-        if (assFiles.length > 0) {
-          assFiles.forEach(file => {
-            const filePath = path.join(tempDir, file);
-            if (fs.existsSync(filePath)) {
-              fs.unlinkSync(filePath);
-              console.log(`🧹 Cleaned up subtitle file: ${filePath}`);
-            }
-          });
-        }
-      } catch (cleanupError: any) {
-        console.warn(`⚠️  Error during cleanup: ${cleanupError.message}`);
-        // Don't fail the job if cleanup fails
+      // Cleanup local files - COMMENTED OUT: Keep files locally for now
+      // try {
+      //   if (fs.existsSync(localVideoPath)) {
+      //     fs.unlinkSync(localVideoPath);
+      //     console.log(`🧹 Cleaned up video file: ${localVideoPath}`);
+      //   }
+      //   if (assFiles.length > 0) {
+      //     assFiles.forEach(file => {
+      //       const filePath = path.join(tempDir, file);
+      //       if (fs.existsSync(filePath)) {
+      //         fs.unlinkSync(filePath);
+      //         console.log(`🧹 Cleaned up subtitle file: ${filePath}`);
+      //       }
+      //     });
+      //   }
+      // } catch (cleanupError: any) {
+      //   console.warn(`⚠️  Error during cleanup: ${cleanupError.message}`);
+      //   // Don't fail the job if cleanup fails
+      // }
+      console.log(`📁 Keeping files locally for debugging:`);
+      console.log(`   Video: ${localVideoPath}`);
+      if (assFiles.length > 0) {
+        assFiles.forEach(file => {
+          const filePath = path.join(tempDir, file);
+          console.log(`   Subtitle: ${filePath}`);
+        });
       }
       
       job.updateProgress({ percent: 100, message: 'Processing complete! Subtitle saved locally.' });

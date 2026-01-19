@@ -14,9 +14,13 @@ interface VideoPlayerProps {
 export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const subtitleContainerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [subtitlesEnabled, setSubtitlesEnabled] = useState(false);
   const [subtitleText, setSubtitleText] = useState<string>('');
   const [subtitleData, setSubtitleData] = useState<any[]>([]);
+  const [isPaused, setIsPaused] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
 
   // Load and parse ASS subtitle file
   useEffect(() => {
@@ -78,7 +82,24 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
     loadSubtitles();
   }, [subtitlesEnabled, subtitleUrl]);
 
-  // Update subtitle display based on video time
+  // Track video pause state
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const handlePlay = () => setIsPaused(false);
+    const handlePause = () => setIsPaused(true);
+
+    video.addEventListener('play', handlePlay);
+    video.addEventListener('pause', handlePause);
+
+    return () => {
+      video.removeEventListener('play', handlePlay);
+      video.removeEventListener('pause', handlePause);
+    };
+  }, []);
+
+  // Update subtitle display based on video time - continues even when paused
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !subtitlesEnabled || subtitleData.length === 0) {
@@ -94,11 +115,27 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
       setSubtitleText(activeSubtitle ? activeSubtitle.text : '');
     };
 
-    video.addEventListener('timeupdate', updateSubtitle);
+    // Update immediately
+    updateSubtitle();
+
+    // Continue updating even when paused - use interval for paused state
+    let intervalId: NodeJS.Timeout | null = null;
+    
+    if (isPaused) {
+      // When paused, continue checking subtitle timing
+      intervalId = setInterval(updateSubtitle, 100);
+    } else {
+      // When playing, use timeupdate event
+      video.addEventListener('timeupdate', updateSubtitle);
+    }
+
     return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
       video.removeEventListener('timeupdate', updateSubtitle);
     };
-  }, [subtitlesEnabled, subtitleData]);
+  }, [subtitlesEnabled, subtitleData, isPaused]);
 
   const parseAssTime = (timeStr: string): number => {
     // ASS format: H:MM:SS.CC (hours:minutes:seconds.centiseconds)
@@ -118,8 +155,38 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
     setSubtitlesEnabled(!subtitlesEnabled);
   };
 
+  // Handle single click to pause/play
+  const handleVideoClick = (e: React.MouseEvent<HTMLVideoElement>) => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    // Don't pause if clicking on controls
+    const target = e.target as HTMLElement;
+    if (target.closest('video') && !target.closest('.video-controls')) {
+      if (video.paused) {
+        video.play();
+      } else {
+        video.pause();
+      }
+    }
+  };
+
+  // Handle close with animation
+  const handleClose = () => {
+    setIsClosing(true);
+    // Wait for animation to complete before calling onClose
+    setTimeout(() => {
+      onClose?.();
+    }, 300); // Match animation duration
+  };
+
   return (
-    <Card className="w-full max-w-4xl mx-auto">
+    <Card 
+      ref={containerRef}
+      className={`w-full max-w-4xl mx-auto transition-all duration-300 ${
+        isClosing ? 'opacity-0 scale-95 translate-y-4' : 'opacity-100 scale-100 translate-y-0'
+      }`}
+    >
       <CardHeader>
         <div className="flex justify-between items-center">
           <CardTitle>{title}</CardTitle>
@@ -134,7 +201,12 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
               </Button>
             )}
             {onClose && (
-              <Button variant="ghost" size="sm" onClick={onClose}>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={handleClose}
+                className="transition-all duration-300 hover:scale-105"
+              >
                 Close
               </Button>
             )}
@@ -142,12 +214,18 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
         </div>
       </CardHeader>
       <CardContent>
-        <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
+        <div 
+          className="relative w-full" 
+          style={{ paddingBottom: '56.25%' }}
+          onMouseEnter={() => setIsHovered(true)}
+          onMouseLeave={() => setIsHovered(false)}
+        >
           <video
             ref={videoRef}
             controls
             className="absolute top-0 left-0 w-full h-full rounded-lg"
             style={{ backgroundColor: '#000' }}
+            onClick={handleVideoClick}
           >
             <source src={videoUrl} type="video/mp4" />
             Your browser does not support the video tag.
@@ -155,7 +233,7 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
           {subtitlesEnabled && subtitleText && (
             <div
               ref={subtitleContainerRef}
-              className="absolute bottom-16 left-1/2 transform -translate-x-1/2 px-4 py-2 bg-black bg-opacity-75 text-white text-center rounded max-w-4xl"
+              className="absolute bottom-16 left-1/2 transform -translate-x-1/2 px-4 py-2 bg-black bg-opacity-75 text-white text-center rounded max-w-4xl animate-fadeIn"
               style={{
                 pointerEvents: 'none',
                 zIndex: 10,

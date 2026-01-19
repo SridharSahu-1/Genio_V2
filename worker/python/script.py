@@ -10,19 +10,24 @@ import sys
 import requests
 import tempfile
 
+# Try to import OpenAI whisper as fallback for macOS SIGSEGV issues
+try:
+    import whisper
+    WHISPER_AVAILABLE = True
+except ImportError:
+    WHISPER_AVAILABLE = False
+    print("⚠️  OpenAI whisper not available, will use WhisperX only")
+
 # Suppress annoying warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 # Fix for PyTorch 2.6+ 
-# Not needed for Torch 2.1.2, but safe to keep wrapped if version checks were added.
-# For now, removing the override to prevent issues with older torch versions if it fails.
-if torch.__version__ >= "2.4":
-    _orig_torch_load = torch.load
-    def _new_torch_load(*args, **kwargs):
-        kwargs['weights_only'] = False
-        return _orig_torch_load(*args, **kwargs)
-    torch.load = _new_torch_load
+_orig_torch_load = torch.load
+def _new_torch_load(*args, **kwargs):
+    kwargs['weights_only'] = False
+    return _orig_torch_load(*args, **kwargs)
+torch.load = _new_torch_load
 
 def format_ass_timestamp(seconds: float):
     td = timedelta(seconds=max(0, seconds))
@@ -152,6 +157,18 @@ def download_from_url(url: str, output_path: str):
         raise
 
 def process_video_diarization(input_file_or_url, hf_token, output_dir, output_path=None):
+    # Log output directory at start
+    print(f"📁 Output directory: {output_dir}")
+    print(f"📁 Output directory absolute path: {os.path.abspath(output_dir)}")
+    print(f"📁 Output directory exists: {os.path.exists(output_dir)}")
+    sys.stdout.flush()
+    
+    # Ensure output directory exists
+    if not os.path.exists(output_dir):
+        print(f"Creating output directory: {output_dir}")
+        os.makedirs(output_dir, exist_ok=True)
+        sys.stdout.flush()
+    
     # Handle presigned URL - download if it's a URL
     input_file = input_file_or_url
     if input_file_or_url.startswith('http://') or input_file_or_url.startswith('https://'):
@@ -170,103 +187,133 @@ def process_video_diarization(input_file_or_url, hf_token, output_dir, output_pa
         # MPS is available for PyTorch operations, but faster-whisper doesn't support it
         # Use CPU for whisperx.load_model, but can use MPS for other PyTorch operations
         device = "cpu"  # faster-whisper requires CPU or CUDA
-        compute_type = "float32"  # Use float32 instead of int8 - int8 can cause SIGSEGV on macOS
+        # Use float32 instead of int8 - int8 can cause SIGSEGV on macOS with faster-whisper
+        compute_type = "float32"
         print("✅ Apple GPU Detected: MPS available for PyTorch, but using CPU for WhisperX (faster-whisper doesn't support MPS).")
+        print("   Using float32 compute_type to avoid SIGSEGV on macOS")
     else:
         device = "cpu"
-        compute_type = "float32"  # Use float32 for stability
-        print("⚠️  GPU Not Detected: Using CPU with float32 precision.")
+        # Use float32 instead of int8 - int8 can cause SIGSEGV on macOS with faster-whisper
+        compute_type = "float32"
+        print("⚠️  GPU Not Detected: Using CPU with float32 precision (int8 causes SIGSEGV on macOS).")
 
     if not os.path.exists(input_file):
         print(f"Error: File '{input_file}' not found.")
         return
 
-    # 1. Transcribe
+    # 1. Transcribe - Use OpenAI whisper on macOS to avoid faster-whisper SIGSEGV
     print(f"--- Step 1: Transcribing {input_file} (Device: {device}) ---")
     sys.stdout.flush()
-    # Drastically reduce batch size to 1 to prevent OOM
-    # Also restrict threads if on CPU to prevent memory bloat
-    if device == "cpu":
-        # Use fewer threads to prevent memory issues - single thread is safest
-        torch.set_num_threads(1)  # Single thread to minimize memory usage
-        # Start with tiny model to avoid SIGSEGV crashes (can upgrade if successful)
-        model_size = "tiny"  # tiny, base, small, medium, large
-        print(f"Using model size: {model_size} (optimized for CPU stability)")
-        print(f"Using single thread for CPU to minimize memory usage")
-    else:
-        model_size = "small"  # Use small for GPU
+    
+    # On macOS/CPU, use OpenAI whisper instead of faster-whisper to avoid SIGSEGV
+    use_openai_whisper = (device == "cpu" and WHISPER_AVAILABLE)
+    
+    if use_openai_whisper:
+        print("✅ Using OpenAI Whisper for transcription (avoids faster-whisper SIGSEGV on macOS)")
+        sys.stdout.flush()
         
-    print(f"Loading WhisperX model: {model_size} on {device} with {compute_type}...")
-    sys.stdout.flush()
-    
-    # Try loading model with error handling
-    try:
-        print(f"Attempting to load {model_size} model...")
+        model_size = "base"  # Use base model for good quality/speed balance
+        print(f"Loading OpenAI Whisper model: {model_size}...")
         sys.stdout.flush()
-        model = whisperx.load_model(model_size, device, compute_type=compute_type)
-        print(f"✅ Successfully loaded {model_size} model")
-        sys.stdout.flush()
-    except Exception as e:
-        print(f"❌ Failed to load {model_size} model: {e}")
-        sys.stdout.flush()
-        if device == "cpu" and model_size != "tiny":
-            print(f"⚠️  Falling back to 'tiny' model (lower quality but more memory-efficient)...")
+        
+        try:
+            whisper_model = whisper.load_model(model_size)
+            print(f"✅ Successfully loaded {model_size} model")
             sys.stdout.flush()
-            model_size = "tiny"
+            
+            print(f"Loading audio from: {input_file}")
+            sys.stdout.flush()
+            audio = whisper.load_audio(input_file)
+            print(f"✅ Audio loaded successfully")
+            sys.stdout.flush()
+            
+            print(f"Starting transcription with OpenAI Whisper...")
+            sys.stdout.flush()
+            # Use OpenAI whisper transcribe - this doesn't use faster-whisper
+            result = whisper_model.transcribe(audio, task="transcribe", language=None)
+            print(f"✅ Transcription completed")
+            sys.stdout.flush()
+            
+            # Convert OpenAI whisper format to WhisperX format
+            if "segments" not in result:
+                raise ValueError("Transcription failed: unexpected result format")
+            
+            # Ensure result has language field
+            if "language" not in result:
+                result["language"] = result.get("language", "en")
+            
+            # Clean up
+            del whisper_model
+            gc.collect()
+            
+        except Exception as e:
+            print(f"❌ OpenAI Whisper transcription failed: {e}")
+            print(f"   Error type: {type(e).__name__}")
+            print(f"   Falling back to WhisperX...")
+            sys.stdout.flush()
+            use_openai_whisper = False  # Fall back to WhisperX
+    
+    if not use_openai_whisper:
+        # Use WhisperX (faster-whisper) - may cause SIGSEGV on macOS
+        print("⚠️  Using WhisperX (faster-whisper) - may cause SIGSEGV on macOS")
+        sys.stdout.flush()
+        
+        # Try tiny model first on macOS - it's the most stable
+        model_sizes_to_try = ["tiny", "base"] if device == "cpu" else ["base", "small"]
+        model = None
+        model_size = None
+        
+        for size in model_sizes_to_try:
             try:
-                model = whisperx.load_model(model_size, device, compute_type=compute_type)
-                print(f"✅ Successfully loaded {model_size} model")
+                print(f"Attempting to load {size} model...")
                 sys.stdout.flush()
-            except Exception as e2:
-                print(f"❌ Failed to load tiny model as well: {e2}")
-                raise
-        else:
+                model = whisperx.load_model(size, device, compute_type=compute_type)
+                model_size = size
+                print(f"✅ Successfully loaded {size} model")
+                sys.stdout.flush()
+                break
+            except Exception as e:
+                print(f"⚠️  Failed to load {size} model: {e}")
+                sys.stdout.flush()
+                if size == model_sizes_to_try[-1]:
+                    raise RuntimeError(f"Failed to load any model. Last error: {e}")
+                continue
+        
+        if not model:
+            raise RuntimeError("Failed to load any WhisperX model")
+        
+        # Explicit GC before transcription
+        gc.collect()
+        
+        print(f"Loading audio from: {input_file}")
+        sys.stdout.flush()
+        try:
+            audio = whisperx.load_audio(input_file)
+            print(f"✅ Audio loaded successfully. Shape: {audio.shape if hasattr(audio, 'shape') else 'N/A'}")
+            sys.stdout.flush()
+        except Exception as e:
+            print(f"❌ Failed to load audio: {e}")
+            sys.stdout.flush()
             raise
-    
-    # Explicit GC before transcription
-    gc.collect()
-    
-    print(f"Loading audio from: {input_file}")
-    sys.stdout.flush()
-    try:
-        audio = whisperx.load_audio(input_file)
-        print(f"✅ Audio loaded successfully. Shape: {audio.shape if hasattr(audio, 'shape') else 'N/A'}")
+        
+        # Transcription with minimal batch size
+        print(f"Starting transcription with batch_size=1...")
         sys.stdout.flush()
-    except Exception as e:
-        print(f"❌ Failed to load audio: {e}")
-        sys.stdout.flush()
-        raise
-    
-    # Try transcription with minimal settings to avoid SIGSEGV
-    print(f"Starting transcription with minimal settings...")
-    sys.stdout.flush()
-    try:
-        # Use whisperx.transcribe which might handle errors better
-        result = model.transcribe(audio, batch_size=1, language=None, task="transcribe")
-        print(f"✅ Transcription completed")
-        sys.stdout.flush()
-    except Exception as e:
-        print(f"❌ Transcription failed: {e}")
-        print(f"   Error type: {type(e).__name__}")
-        print(f"   This may be a compatibility issue with faster-whisper/ctranslate2 on macOS")
-        print(f"   Consider using Docker for more stable transcription")
-        sys.stdout.flush()
-        raise
-    except (SystemExit, KeyboardInterrupt):
-        raise
-    except BaseException as e:
-        # Catch SIGSEGV and other crashes
-        print(f"❌ Transcription crashed: {type(e).__name__}: {e}")
-        print(f"   This is likely a ctranslate2/faster-whisper compatibility issue on macOS")
-        print(f"   Try: docker-compose up worker (for stable transcription)")
-        sys.stdout.flush()
-        raise RuntimeError(f"Transcription crashed: {type(e).__name__}: {str(e)}. This may be a faster-whisper/ctranslate2 compatibility issue on macOS. Consider using Docker.")
-    
-    # Free memory immediately after transcription
-    del model
-    gc.collect()
-    if device == "cuda":
-        torch.cuda.empty_cache()
+        try:
+            result = model.transcribe(audio, batch_size=1, task="transcribe")
+            print(f"✅ Transcription completed")
+            sys.stdout.flush()
+        except Exception as e:
+            print(f"❌ Transcription failed: {e}")
+            print(f"   Error type: {type(e).__name__}")
+            sys.stdout.flush()
+            raise
+        
+        # Free memory immediately after transcription
+        del model
+        gc.collect()
+        if device == "cuda":
+            torch.cuda.empty_cache()
     
     detected_lang = result["language"]
     print(f"Detected Language: {detected_lang}")
@@ -302,12 +349,39 @@ def process_video_diarization(input_file_or_url, hf_token, output_dir, output_pa
         pass 
 
     # 4. Save
+    print(f"--- Step 4: Saving subtitle file ---")
+    sys.stdout.flush()
+    
+    # Ensure output directory exists
+    if not os.path.exists(output_dir):
+        print(f"Creating output directory: {output_dir}")
+        os.makedirs(output_dir, exist_ok=True)
+        sys.stdout.flush()
+    
     base_name = os.path.splitext(os.path.basename(input_file))[0]
     output_ass = os.path.join(output_dir, f"{base_name}_{detected_lang}.ass")
-    create_highlighting_subs(result, output_ass)
-
-    print(f"\n✅ Success! [{detected_lang}] Subtitle file: {output_ass}")
+    
+    print(f"Output directory: {output_dir}")
+    print(f"Output directory exists: {os.path.exists(output_dir)}")
+    print(f"Output ASS file path: {output_ass}")
     sys.stdout.flush()
+    
+    try:
+        create_highlighting_subs(result, output_ass)
+        
+        # Verify file was created
+        if os.path.exists(output_ass):
+            file_size = os.path.getsize(output_ass)
+            print(f"\n✅ Success! [{detected_lang}] Subtitle file created: {output_ass}")
+            print(f"   File size: {file_size} bytes")
+        else:
+            print(f"\n❌ ERROR: Subtitle file was not created at: {output_ass}")
+        sys.stdout.flush()
+    except Exception as e:
+        print(f"\n❌ ERROR creating subtitle file: {e}")
+        print(f"   Error type: {type(e).__name__}")
+        sys.stdout.flush()
+        raise
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
