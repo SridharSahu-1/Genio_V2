@@ -3,7 +3,8 @@ import mongoose from 'mongoose';
 const videoSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   title: { type: String, required: true },
-  originalKey: { type: String, required: true },
+  originalKey: { type: String, required: true }, // Local file path or S3 key
+  s3Key: { type: String }, // S3 key (optional, for videos uploaded to S3)
   videoUrl: { type: String }, // Public S3 URL for direct access
   subtitleKey: { type: String },
   docId: { type: String, unique: true, sparse: true }, // Unique identifier for linking video and subtitle

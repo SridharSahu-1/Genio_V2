@@ -36,6 +36,8 @@ export default function Dashboard() {
   const [logs, setLogs] = useState<Record<string, string[]>>({});
   const [uploading, setUploading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string>('');
+  const [uploadMode, setUploadMode] = useState<'file' | 'url'>('file');
   const [playingVideo, setPlayingVideo] = useState<PlaybackData | null>(null);
   const router = useRouter();
 
@@ -84,31 +86,47 @@ export default function Dashboard() {
   };
 
   const handleUpload = async () => {
-    if (!file) return alert('Please select a file');
+    if (uploadMode === 'file' && !file) {
+      return alert('Please select a file');
+    }
+    if (uploadMode === 'url' && !videoUrl.trim()) {
+      return alert('Please enter a video URL');
+    }
     setUploading(true);
 
     try {
-      // DIRECT UPLOAD - Upload directly to server (bypasses S3)
-      console.log(`📤 Uploading file directly to server: ${file.name}`);
+      let uploadRes;
       
-      const formData = new FormData();
-      formData.append('file', file);
-      
-      // Use api instance which has auth interceptor
-      // For FormData, don't set Content-Type - browser will set it with boundary
-      const uploadRes = await api.post('/api/videos/upload-direct', formData, {
-        headers: {
-          'Content-Type': undefined, // Let browser set Content-Type with boundary for multipart
-        },
-        onUploadProgress: (progressEvent) => {
-          if (progressEvent.total) {
-            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-            console.log(`Upload progress: ${percentCompleted}%`);
-          }
-        },
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity,
-      });
+      if (uploadMode === 'file') {
+        // DIRECT UPLOAD - Upload directly to server (bypasses S3)
+        console.log(`📤 Uploading file directly to server: ${file!.name}`);
+        
+        const formData = new FormData();
+        formData.append('file', file!);
+        
+        // Use api instance which has auth interceptor
+        // For FormData, don't set Content-Type - browser will set it with boundary
+        uploadRes = await api.post('/api/videos/upload-direct', formData, {
+          headers: {
+            'Content-Type': undefined, // Let browser set Content-Type with boundary for multipart
+          },
+          onUploadProgress: (progressEvent) => {
+            if (progressEvent.total) {
+              const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+              console.log(`Upload progress: ${percentCompleted}%`);
+            }
+          },
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
+        });
+      } else {
+        // URL UPLOAD - Download video from URL
+        console.log(`📤 Uploading video from URL: ${videoUrl}`);
+        
+        uploadRes = await api.post('/api/videos/upload-url', {
+          url: videoUrl.trim(),
+        });
+      }
       
       const { videoId } = uploadRes.data;
       console.log('✅ File uploaded successfully to server');
@@ -172,6 +190,7 @@ export default function Dashboard() {
     } finally {
       setUploading(false);
       setFile(null);
+      setVideoUrl('');
     }
   };
 
@@ -229,10 +248,43 @@ export default function Dashboard() {
             <CardTitle>New Project</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div>
-              <Label>Video File</Label>
-              <Input type="file" onChange={handleFileChange} accept="video/*" />
+            <div className="flex gap-2 mb-4">
+              <Button
+                variant={uploadMode === 'file' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setUploadMode('file')}
+              >
+                Upload File
+              </Button>
+              <Button
+                variant={uploadMode === 'url' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setUploadMode('url')}
+              >
+                From URL
+              </Button>
             </div>
+            
+            {uploadMode === 'file' ? (
+              <div>
+                <Label>Video File</Label>
+                <Input type="file" onChange={handleFileChange} accept="video/*" />
+              </div>
+            ) : (
+              <div>
+                <Label>Video URL</Label>
+                <Input
+                  type="url"
+                  placeholder="https://example.com/video.mp4"
+                  value={videoUrl}
+                  onChange={(e) => setVideoUrl(e.target.value)}
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Enter a direct link to a video file (MP4, WebM, etc.)
+                </p>
+              </div>
+            )}
+            
             <Button onClick={handleUpload} disabled={uploading}>
               {uploading ? 'Uploading...' : 'Upload & Process'}
             </Button>

@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify';
-import { initUpload, startProcessing, getVideos, getSubtitleDownloadUrl, getVideoPlaybackUrl, verifyUpload, directUpload, serveVideoFile } from '../controllers/videoController';
+import { initUpload, startProcessing, getVideos, getSubtitleDownloadUrl, getVideoPlaybackUrl, verifyUpload, directUpload, uploadFromUrl, serveVideoFile } from '../controllers/videoController';
 
 export default async function videoRoutes(fastify: FastifyInstance) {
   fastify.addHook('onRequest', async (request, reply) => {
@@ -12,6 +12,9 @@ export default async function videoRoutes(fastify: FastifyInstance) {
 
   // Direct upload (bypasses S3)
   fastify.post('/upload-direct', directUpload);
+  
+  // Upload from URL
+  fastify.post('/upload-url', uploadFromUrl);
   
   // S3 upload (existing)
   fastify.post('/upload', initUpload);
