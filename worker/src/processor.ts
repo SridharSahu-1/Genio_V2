@@ -21,13 +21,13 @@ const getS3Client = (): S3Client => {
     const region = process.env.AWS_REGION || 'us-east-1';
     const accessKeyId = process.env.AWS_ACCESS_KEY_ID || '';
     const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY || '';
-    
+
     if (!accessKeyId || !secretAccessKey) {
       throw new Error('AWS credentials (AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY) are required in worker/.env');
     }
-    
+
     console.log(`🔧 Initializing S3 client - Region: ${region}, AccessKey: ${accessKeyId.substring(0, 8)}...`);
-    
+
     s3Client = new S3Client({
       region: region,
       credentials: {
@@ -56,7 +56,7 @@ const logS3Config = () => {
 export const processVideo = async (job: Job) => {
   // Log S3 config on first use (after env vars are loaded)
   logS3Config();
-  
+
   console.log('='.repeat(70));
   console.log('📥 WORKER RECEIVED JOB');
   console.log('='.repeat(70));
@@ -69,7 +69,7 @@ export const processVideo = async (job: Job) => {
     console.log(`videoKey bytes: ${Buffer.from(job.data.videoKey).toString('hex').substring(0, 100)}...`);
   }
   console.log('='.repeat(70));
-  
+
   // Extract job data - ensure we get the exact key
   const jobData = job.data;
   const videoKey = jobData?.videoKey;
@@ -81,7 +81,7 @@ export const processVideo = async (job: Job) => {
   const hfToken = (hfTokenFromJob && hfTokenFromJob.trim() !== '') ? hfTokenFromJob : hfTokenFromEnv;
   const docId = jobData?.docId;
   const videoId = jobData?.videoId;
-  
+
   // videoUrl is optional now - we use direct S3 download with videoKey
   // But we'll log it for reference if provided
 
@@ -109,7 +109,7 @@ export const processVideo = async (job: Job) => {
     console.error(`   Please add HF_TOKEN=your_token_here to worker/.env file`);
     throw new Error(errorMsg);
   }
-  
+
   console.log(`✅ HF_TOKEN available (masked for security)`);
 
   if (!videoKey || typeof videoKey !== 'string') {
@@ -123,12 +123,12 @@ export const processVideo = async (job: Job) => {
 
   const tempDir = path.resolve(__dirname, '../temp');
   if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-  
+
   // Log temp directory for debugging
   console.log(`📁 Temp directory: ${tempDir}`);
   console.log(`📁 Temp directory exists: ${fs.existsSync(tempDir)}`);
   console.log(`📁 Temp directory absolute: ${path.resolve(tempDir)}`);
-  
+
   // Cleanup old temp files (older than 1 hour) to prevent disk space issues
   try {
     const now = Date.now();
@@ -166,7 +166,7 @@ export const processVideo = async (job: Job) => {
   let localVideoPath: string;
   // Check if it's a local file: explicit flag OR videoUrl is a file path (not HTTP)
   const isLocalFile = jobData?.isLocalFile || (videoUrl && !videoUrl.startsWith('http') && (videoUrl.startsWith('/') || path.isAbsolute(videoUrl)));
-  
+
   if (isLocalFile) {
     // LOCAL FILE - Use directly
     console.log('='.repeat(70));
@@ -174,25 +174,25 @@ export const processVideo = async (job: Job) => {
     console.log('='.repeat(70));
     console.log(`✅ Local file path provided`);
     console.log(`   Original path: ${videoUrl}`);
-    
+
     // Check if we're running in Docker
     const isDocker = fs.existsSync('/.dockerenv') || process.env.REDIS_HOST === 'redis';
     console.log(`   Running in Docker: ${isDocker ? 'YES ✅' : 'NO (local)'}`);
-    
+
     // Map server path to Docker mount path
     // Server saves to: /path/to/server/uploads/filename.mp4
     // Docker mount: /app/server-uploads/filename.mp4
     let actualPath = videoUrl;
     const filename = path.basename(videoUrl) || `video-${videoId || Date.now()}.mp4`;
     const dockerPath = path.join('/app/server-uploads', filename);
-    
+
     console.log(`   🔍 Looking for file:`);
     console.log(`      Original path: ${videoUrl}`);
     console.log(`      Extracted filename: ${filename}`);
-    
+
     // Try Docker mount path if in Docker, otherwise try original path first
     console.log(`      Docker mount path: ${dockerPath}`);
-    
+
     if (isDocker) {
       // In Docker: try Docker mount path first (volume mount)
       // List all files in Docker mount for debugging
@@ -202,7 +202,7 @@ export const processVideo = async (job: Job) => {
       } catch (err) {
         console.warn(`      Could not list Docker mount directory: ${err}`);
       }
-      
+
       if (fs.existsSync(dockerPath)) {
         actualPath = dockerPath;
         console.log(`   ✅ Found in Docker mount: ${actualPath}`);
@@ -214,12 +214,12 @@ export const processVideo = async (job: Job) => {
         // Filename format: {userId}-{timestamp}-{originalName}
         try {
           const allFiles = fs.readdirSync('/app/server-uploads');
-          const matchingFiles = allFiles.filter(f => 
+          const matchingFiles = allFiles.filter(f =>
             f.includes(filename.split('-')[0]) || // Match user ID
             f.endsWith(path.extname(filename)) || // Match extension
             f.includes(path.basename(filename, path.extname(filename))) // Match base name
           );
-          
+
           if (matchingFiles.length > 0) {
             console.log(`   🔍 Found ${matchingFiles.length} potential matches:`, matchingFiles.slice(0, 3).join(', '));
             // Try the most recent match
@@ -246,58 +246,58 @@ export const processVideo = async (job: Job) => {
         }
       }
     }
-    
+
     // Final check
     if (!fs.existsSync(actualPath)) {
-        // Try alternative paths
-        const altPaths = [
-          dockerPath,
-          path.join('/app', 'server-uploads', filename),
-          videoUrl,
-        ];
-        
-        let found = false;
-        for (const altPath of altPaths) {
-          if (fs.existsSync(altPath)) {
-            actualPath = altPath;
-            found = true;
-            console.log(`   ✅ Found at: ${actualPath}`);
-            break;
-          }
-        }
-        
-        if (!found) {
-          // Last resort: wait a bit and retry (Docker volume sync delay)
-          console.log(`   ⏳ File not found immediately, waiting 2 seconds for Docker volume sync...`);
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          
-          // Retry all paths
-          if (fs.existsSync(dockerPath)) {
-            actualPath = dockerPath;
-            console.log(`   ✅ Found after retry: ${actualPath}`);
-          } else if (fs.existsSync(videoUrl)) {
-            actualPath = videoUrl;
-            console.log(`   ✅ Found after retry: ${actualPath}`);
-          } else {
-            console.error(`   ❌ File still not found after retry. Tried:`);
-            altPaths.forEach(p => console.error(`      - ${p}`));
-            // List recent files to help debug
-            try {
-              const allFiles = fs.readdirSync('/app/server-uploads');
-              const recentFiles = allFiles.slice(-10);
-              console.error(`   Recent files in Docker mount (${allFiles.length} total):`, recentFiles.join(', '));
-              console.error(`   Looking for filename containing: ${filename.split('-')[0]} (user ID)`);
-            } catch (err) {
-              console.error(`   Could not list files: ${err}`);
-            }
-            throw new Error(`Local video file not found. Original: ${videoUrl}, Docker: ${dockerPath}. Check if file exists in /app/server-uploads/`);
-          }
+      // Try alternative paths
+      const altPaths = [
+        dockerPath,
+        path.join('/app', 'server-uploads', filename),
+        videoUrl,
+      ];
+
+      let found = false;
+      for (const altPath of altPaths) {
+        if (fs.existsSync(altPath)) {
+          actualPath = altPath;
+          found = true;
+          console.log(`   ✅ Found at: ${actualPath}`);
+          break;
         }
       }
-    
+
+      if (!found) {
+        // Last resort: wait a bit and retry (Docker volume sync delay)
+        console.log(`   ⏳ File not found immediately, waiting 2 seconds for Docker volume sync...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Retry all paths
+        if (fs.existsSync(dockerPath)) {
+          actualPath = dockerPath;
+          console.log(`   ✅ Found after retry: ${actualPath}`);
+        } else if (fs.existsSync(videoUrl)) {
+          actualPath = videoUrl;
+          console.log(`   ✅ Found after retry: ${actualPath}`);
+        } else {
+          console.error(`   ❌ File still not found after retry. Tried:`);
+          altPaths.forEach(p => console.error(`      - ${p}`));
+          // List recent files to help debug
+          try {
+            const allFiles = fs.readdirSync('/app/server-uploads');
+            const recentFiles = allFiles.slice(-10);
+            console.error(`   Recent files in Docker mount (${allFiles.length} total):`, recentFiles.join(', '));
+            console.error(`   Looking for filename containing: ${filename.split('-')[0]} (user ID)`);
+          } catch (err) {
+            console.error(`   Could not list files: ${err}`);
+          }
+          throw new Error(`Local video file not found. Original: ${videoUrl}, Docker: ${dockerPath}. Check if file exists in /app/server-uploads/`);
+        }
+      }
+    }
+
     const fileSize = fs.statSync(actualPath).size;
     console.log(`✅ Local file verified: ${fileSize} bytes`);
-    
+
     // Copy to temp directory for processing (Python script expects it there)
     localVideoPath = path.join(tempDir, filename);
     fs.copyFileSync(actualPath, localVideoPath);
@@ -308,37 +308,37 @@ export const processVideo = async (job: Job) => {
     if (!videoUrl || typeof videoUrl !== 'string' || !videoUrl.startsWith('http')) {
       throw new Error(`Invalid or missing public video URL. videoUrl: ${videoUrl}. The bucket must be public and videoUrl must be a valid HTTP(S) URL.`);
     }
-    
+
     console.log('='.repeat(70));
     console.log('📥 DOWNLOADING VIDEO FROM PUBLIC URL (HTTP)');
     console.log('='.repeat(70));
     console.log(`✅ Using public URL - downloading via HTTP`);
     console.log(`   Video URL: ${videoUrl}`);
     console.log(`   Video Key: "${videoKey}" (for reference only)`);
-    
+
     try {
       console.log(`🔄 Downloading from URL...`);
       const https = require('https');
       const http = require('http');
-      
+
       const parsedUrl = new URL(videoUrl);
       const protocol = parsedUrl.protocol === 'https:' ? https : http;
-      
+
       const filename = path.basename(videoKey) || `video-${videoId || Date.now()}.mp4`;
       localVideoPath = path.join(tempDir, filename);
-      
+
       console.log(`   Downloading to: ${localVideoPath}`);
       console.log(`   URL: ${videoUrl}`);
-      
+
       await new Promise((resolve, reject) => {
         const fileStream = fs.createWriteStream(localVideoPath);
         let downloadedBytes = 0;
-        
+
         const request = protocol.get(videoUrl, (response: any) => {
           if (response.statusCode === 301 || response.statusCode === 302) {
             fileStream.close();
             if (fs.existsSync(localVideoPath)) {
-              try { fs.unlinkSync(localVideoPath); } catch {}
+              try { fs.unlinkSync(localVideoPath); } catch { }
             }
             const redirectUrl = response.headers.location;
             console.log(`   Following redirect to: ${redirectUrl}`);
@@ -361,42 +361,42 @@ export const processVideo = async (job: Job) => {
             });
             return;
           }
-          
+
           if (response.statusCode !== 200) {
             fileStream.close();
             reject(new Error(`HTTP ${response.statusCode}: Failed to download video from URL`));
             return;
           }
-          
+
           response.pipe(fileStream);
-          response.on('data', (chunk: Buffer) => { 
+          response.on('data', (chunk: Buffer) => {
             downloadedBytes += chunk.length;
           });
-          
+
           fileStream.on('finish', () => {
             fileStream.close();
             console.log(`   Downloaded ${downloadedBytes} bytes`);
             resolve(null);
           });
         });
-        
+
         request.on('error', (err: any) => {
           fileStream.close();
           if (fs.existsSync(localVideoPath)) {
-            try { fs.unlinkSync(localVideoPath); } catch {}
+            try { fs.unlinkSync(localVideoPath); } catch { }
           }
           reject(err);
         });
-        
+
         fileStream.on('error', (err: any) => {
           request.abort();
           if (fs.existsSync(localVideoPath)) {
-            try { fs.unlinkSync(localVideoPath); } catch {}
+            try { fs.unlinkSync(localVideoPath); } catch { }
           }
           reject(err);
         });
       });
-      
+
       const fileSize = fs.statSync(localVideoPath).size;
       console.log(`✅ Successfully downloaded video to: ${localVideoPath}`);
       console.log(`   File size: ${fileSize} bytes`);
@@ -413,12 +413,12 @@ export const processVideo = async (job: Job) => {
 
   // 2. Run Python Script
   const scriptPath = path.resolve(__dirname, '../python/script.py');
-  
+
   return new Promise((resolve, reject) => {
     // Check if python command exists, prefer venv
     const venvPython = path.resolve(__dirname, '../venv/bin/python');
     const pythonCmd = fs.existsSync(venvPython) ? venvPython : 'python3';
-    
+
     console.log(`Using python executable: ${pythonCmd}`);
     console.log(`Spawning python script: ${pythonCmd} ${scriptPath}`);
     console.log(`HF Token provided: ${hfToken ? 'Yes (masked)' : 'No'}`);
@@ -427,13 +427,13 @@ export const processVideo = async (job: Job) => {
 
     // Build Python command args - use local file (already downloaded from S3)
     const pythonArgs = [scriptPath];
-    
+
     // Use local file (already downloaded from S3 using AWS credentials)
     console.log(`📁 Using local file (downloaded from S3): ${localVideoPath}`);
     pythonArgs.push('--input', localVideoPath);
     pythonArgs.push('--token', hfToken);
     pythonArgs.push('--output_dir', tempDir);
-    
+
     console.log(`Python command: ${pythonCmd} ${scriptPath} --input ${localVideoPath} --token [TOKEN] --output_dir ${tempDir}`);
     // Set environment variables for Python subprocess to match standalone execution
     const pythonEnv = {
@@ -443,7 +443,7 @@ export const processVideo = async (job: Job) => {
       MKL_NUM_THREADS: '1',   // Limit MKL threads
       NUMEXPR_NUM_THREADS: '1', // Limit NumExpr threads
     };
-    
+
     const pythonProcess = spawn(pythonCmd, pythonArgs, {
       env: pythonEnv,
       cwd: path.resolve(__dirname, '../../'), // Set working directory to worker root
@@ -452,7 +452,7 @@ export const processVideo = async (job: Job) => {
     pythonProcess.stdout.on('data', (data) => {
       const output = data.toString().trim();
       if (!output) return;
-      
+
       console.log(`Python: ${output}`);
       // Parse progress if possible
       if (output.includes('Step 1')) currentProgress = 10;
@@ -468,14 +468,14 @@ export const processVideo = async (job: Job) => {
     pythonProcess.stderr.on('data', (data) => {
       const output = data.toString().trim();
       if (!output) return;
-      
+
       // Filter out warnings and non-critical errors to avoid confusing the user
-      if (output.includes('UserWarning') || 
-          output.includes('FutureWarning') || 
-          output.includes('DeprecationWarning') ||
-          output.includes('Lightning automatically upgraded') ||
-          output.includes('Model was trained with')) {
-          return;
+      if (output.includes('UserWarning') ||
+        output.includes('FutureWarning') ||
+        output.includes('DeprecationWarning') ||
+        output.includes('Lightning automatically upgraded') ||
+        output.includes('Model was trained with')) {
+        return;
       }
 
       console.error(`Python Error: ${output}`);
@@ -485,7 +485,7 @@ export const processVideo = async (job: Job) => {
 
     pythonProcess.on('error', (err) => {
       console.error('Failed to start python process:', err);
-      
+
       // Cleanup on process error
       try {
         if (localVideoPath && fs.existsSync(localVideoPath)) {
@@ -495,7 +495,7 @@ export const processVideo = async (job: Job) => {
       } catch (cleanupError: any) {
         console.warn(`⚠️  Error cleaning up after process error: ${cleanupError.message}`);
       }
-      
+
       reject(new Error(`Failed to start python process: ${err.message}`));
     });
 
@@ -526,14 +526,14 @@ export const processVideo = async (job: Job) => {
             exitMsg = `Python script exited with code ${code} at ${currentProgress}% progress. Check Python output above for details.`;
           }
         }
-        
+
         console.error(`❌ ${exitMsg}`);
         console.error(`   Exit code: ${code}`);
         console.error(`   Signal: ${signal}`);
         console.error(`   Video URL: ${videoUrl || 'MISSING'}`);
         console.error(`   Video Key: "${videoKey}"`);
         console.error(`   Full URL for debugging: ${videoUrl}`);
-        
+
         // Cleanup temp files on error
         try {
           if (localVideoPath && fs.existsSync(localVideoPath)) {
@@ -543,19 +543,19 @@ export const processVideo = async (job: Job) => {
         } catch (cleanupError: any) {
           console.warn(`⚠️  Error cleaning up after failure: ${cleanupError.message}`);
         }
-        
+
         reject(new Error(exitMsg));
         return;
       }
 
       // 3. Upload Result
       job.updateProgress({ percent: 95, message: 'Uploading subtitles to S3...' });
-      
+
       // Find ASS file - Python script generates files like: {base_name}_{detected_lang}.ass
       // The base_name is derived from the downloaded video filename
       console.log(`📁 Looking for ASS files in: ${tempDir}`);
       console.log(`📁 Temp directory exists: ${fs.existsSync(tempDir)}`);
-      
+
       let files: string[] = [];
       try {
         files = fs.readdirSync(tempDir);
@@ -564,13 +564,13 @@ export const processVideo = async (job: Job) => {
         console.error(`❌ Error reading temp directory: ${err.message}`);
         throw new Error(`Cannot read temp directory: ${tempDir}`);
       }
-      
+
       // Look for .ass files - Python generates them with the pattern {base_name}_{lang}.ass
       // But since we're using presigned URLs, the filename might not match exactly
       // So we'll find ANY .ass file in the temp directory
       const assFiles = files.filter(f => f.endsWith('.ass'));
       console.log(`🔍 Found ${assFiles.length} ASS file(s): ${assFiles.join(', ') || 'NONE'}`);
-      
+
       if (assFiles.length === 0) {
         // List all files for debugging
         console.error(`❌ No ASS file found in temp directory`);
@@ -581,63 +581,66 @@ export const processVideo = async (job: Job) => {
         console.error(`   Check the Python output above for SIGSEGV or other errors.`);
         throw new Error('No subtitle file (.ass) was generated by Python script. The script likely crashed during transcription.');
       }
-      
-      let subtitleKey: string | null = null;
-      
+
+      let subtitleS3Key: string | null = null;
+
       if (assFiles.length > 0) {
         // Use the first ASS file found (there should only be one)
         const assFile = assFiles[0];
         const assFilePath = path.join(tempDir, assFile);
-        
-        // Store subtitle locally in client/public/subtitles (accessible via web)
-        // From worker/dist/src -> worker/dist -> worker -> root -> client/public/subtitles
-        const subtitlesDir = path.resolve(__dirname, '../../../client/public/subtitles');
-        if (!fs.existsSync(subtitlesDir)) {
-          fs.mkdirSync(subtitlesDir, { recursive: true });
-        }
-        
+
         // Use docId or videoId for filename
         const subtitleFilename = docId ? `${docId}.ass` : `${videoId}.ass`;
-        const localSubtitlePath = path.join(subtitlesDir, subtitleFilename);
-        
-        // Copy subtitle file to local subtitles directory
-        fs.copyFileSync(assFilePath, localSubtitlePath);
-        
-        // Set subtitleKey to relative path for API access (client/public/subtitles/{id}.ass)
-        subtitleKey = `subtitles/${subtitleFilename}`;
-        
-        console.log(`✅ Subtitle saved locally:`);
+
+        // Upload subtitle to S3
+        const s3 = getS3Client();
+        const bucket = getBucketName();
+
+        // Generate S3 key for subtitle: subtitles/{userId}/{docId or videoId}.ass
+        // Extract userId from videoKey if possible, or use a generic path
+        let userId = 'unknown';
+        if (videoKey && typeof videoKey === 'string') {
+          // Try to extract userId from videoKey (format: uploads/{userId}/...)
+          const keyParts = videoKey.split('/');
+          if (keyParts.length >= 2 && keyParts[0] === 'uploads') {
+            userId = keyParts[1];
+          }
+        }
+
+        const subtitleS3KeyPath = `subtitles/${userId}/${subtitleFilename}`;
+        const cleanSubtitleS3Key = subtitleS3KeyPath.replace(/^\/+|\/+$/g, '').replace(/\/{2,}/g, '/');
+
+        console.log(`📤 Uploading subtitle to S3:`);
+        console.log(`   Bucket: ${bucket}`);
+        console.log(`   Key: ${cleanSubtitleS3Key}`);
         console.log(`   Source: ${assFilePath}`);
-        console.log(`   Destination: ${localSubtitlePath}`);
-        console.log(`   Subtitle Key: ${subtitleKey}`);
-        console.log(`   File size: ${fs.statSync(localSubtitlePath).size} bytes`);
         console.log(`   Doc ID: ${docId || 'N/A'}`);
         console.log(`   Video ID: ${videoId || 'N/A'}`);
+
+        const subtitleContent = fs.readFileSync(assFilePath);
+        const fileSize = subtitleContent.length;
+
+        await s3.send(new PutObjectCommand({
+          Bucket: bucket,
+          Key: cleanSubtitleS3Key,
+          Body: subtitleContent,
+          ContentType: 'text/x-ass; charset=utf-8',
+        }));
+
+        subtitleS3Key = cleanSubtitleS3Key;
+        console.log(`✅ Subtitle uploaded to S3: ${cleanSubtitleS3Key} (${fileSize} bytes)`);
+        console.log(`   ✅ SubtitleS3Key set to: "${subtitleS3Key}"`);
       } else {
         console.error(`❌ No ASS file found in ${tempDir}`);
         console.error(`   Files in directory: ${files.join(', ')}`);
         throw new Error('No subtitle file generated by Python script');
       }
 
-      // Cleanup local files - COMMENTED OUT: Keep files locally for now
-      // try {
-      //   if (fs.existsSync(localVideoPath)) {
-      //     fs.unlinkSync(localVideoPath);
-      //     console.log(`🧹 Cleaned up video file: ${localVideoPath}`);
-      //   }
-      //   if (assFiles.length > 0) {
-      //     assFiles.forEach(file => {
-      //       const filePath = path.join(tempDir, file);
-      //       if (fs.existsSync(filePath)) {
-      //         fs.unlinkSync(filePath);
-      //         console.log(`🧹 Cleaned up subtitle file: ${filePath}`);
-      //       }
-      //     });
-      //   }
-      // } catch (cleanupError: any) {
-      //   console.warn(`⚠️  Error during cleanup: ${cleanupError.message}`);
-      //   // Don't fail the job if cleanup fails
-      // }
+      if (!subtitleS3Key) {
+        console.error(`❌ CRITICAL: subtitleS3Key is null/undefined after upload!`);
+        throw new Error('Subtitle S3 key is missing after upload');
+      }
+
       console.log(`📁 Keeping files locally for debugging:`);
       console.log(`   Video: ${localVideoPath}`);
       if (assFiles.length > 0) {
@@ -646,11 +649,18 @@ export const processVideo = async (job: Job) => {
           console.log(`   Subtitle: ${filePath}`);
         });
       }
-      
-      job.updateProgress({ percent: 100, message: 'Processing complete! Subtitle saved locally.' });
-      
+
+      job.updateProgress({ percent: 100, message: 'Processing complete! Subtitle uploaded to S3.' });
+
+      // Prepare result object
+      const result = { subtitleS3Key };
+      console.log(`📤 Returning result from processVideo:`, JSON.stringify(result, null, 2));
+      console.log(`   Result type: ${typeof result}`);
+      console.log(`   Result.subtitleS3Key: "${result.subtitleS3Key}"`);
+      console.log(`   Result.subtitleS3Key type: ${typeof result.subtitleS3Key}`);
+
       // Return the result so queue listener can use it
-      resolve({ subtitleKey });
+      resolve(result);
     });
   });
 };

@@ -45,8 +45,14 @@ const worker = new Worker(
       if (job.data?.videoUrl) {
         console.log(`   videoUrl (first 100 chars):`, job.data.videoUrl.substring(0, 100));
       }
-      await processVideo(job);
+      
+      // IMPORTANT: Return the result from processVideo so it's available in returnvalue
+      const result = await processVideo(job);
       console.log(`✅ Job ${job.id} completed successfully`);
+      console.log(`   Result returned:`, JSON.stringify(result, null, 2));
+      
+      // Return the result so it's available in queueListener's returnvalue
+      return result;
     } catch (error: any) {
       console.error(`❌ Error processing job ${job?.id}:`, error);
       console.error(`   Error name: ${error?.name || 'Unknown'}`);

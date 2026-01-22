@@ -225,6 +225,34 @@ export const getDownloadUrl = async (key: string) => {
   return presignedUrl;
 };
 
+// Generate presigned URL for any S3 key (simpler version without retry logic)
+// Use this when you know the file exists or want to generate URL without verification
+export const getPresignedUrl = async (key: string, expiresIn: number = 3600): Promise<string> => {
+  const s3 = getS3Client();
+  const bucket = getBucketName();
+  const cleanKey = cleanS3Key(key);
+
+  console.log(`🔗 Generating presigned URL`);
+  console.log(`   Key: "${cleanKey}"`);
+  console.log(`   Bucket: ${bucket}`);
+  console.log(`   Expires in: ${expiresIn} seconds`);
+
+  const command = new GetObjectCommand({
+    Bucket: bucket,
+    Key: cleanKey,
+  });
+  
+  try {
+    const presignedUrl = await getSignedUrl(s3, command, { expiresIn });
+    console.log(`✅ Presigned URL generated successfully`);
+    console.log(`   URL (first 100 chars): ${presignedUrl.substring(0, 100)}...`);
+    return presignedUrl;
+  } catch (error: any) {
+    console.error(`❌ Failed to generate presigned URL: ${error.message}`);
+    throw new Error(`Failed to generate presigned URL: ${error.message}`);
+  }
+};
+
 // Helper to list objects with a prefix (for debugging)
 export const listObjectsWithPrefix = async (prefix: string, maxKeys: number = 10): Promise<string[]> => {
   try {
