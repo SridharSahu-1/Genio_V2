@@ -227,7 +227,7 @@ export const getDownloadUrl = async (key: string) => {
 
 // Generate presigned URL for any S3 key (simpler version without retry logic)
 // Use this when you know the file exists or want to generate URL without verification
-export const getPresignedUrl = async (key: string, expiresIn: number = 3600): Promise<string> => {
+export const getPresignedUrl = async (key: string, expiresIn: number = 3600, forceDownload: boolean = false, filename?: string): Promise<string> => {
   const s3 = getS3Client();
   const bucket = getBucketName();
   const cleanKey = cleanS3Key(key);
@@ -236,10 +236,14 @@ export const getPresignedUrl = async (key: string, expiresIn: number = 3600): Pr
   console.log(`   Key: "${cleanKey}"`);
   console.log(`   Bucket: ${bucket}`);
   console.log(`   Expires in: ${expiresIn} seconds`);
+  console.log(`   Force download: ${forceDownload}`);
 
   const command = new GetObjectCommand({
     Bucket: bucket,
     Key: cleanKey,
+    ...(forceDownload && filename ? {
+      ResponseContentDisposition: `attachment; filename="${filename.replace(/"/g, '\\"')}"`,
+    } : {}),
   });
   
   try {

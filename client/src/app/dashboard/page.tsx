@@ -1,18 +1,23 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import VideoPlayer from '@/components/VideoPlayer';
+import VideoEditor from '@/components/VideoEditor';
 import SubtitleGenerationAnimation from '@/components/SubtitleGenerationAnimation';
+import ThreeBackground from '@/components/ThreeBackground';
 import api from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { io } from 'socket.io-client';
 import { toast } from 'sonner';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
+import { useDropzone } from 'react-dropzone';
+import gsap from 'gsap';
+import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { 
   Upload, 
   Link as LinkIcon, 
@@ -28,8 +33,18 @@ import {
   X,
   Sparkles,
   ArrowRight,
-  FileCheck
+  FileCheck,
+  Edit3,
+  Crop,
+  Scissors,
+  Zap,
+  TrendingUp,
+  BarChart3,
+  Settings,
+  Image as ImageIcon
 } from 'lucide-react';
+
+gsap.registerPlugin(ScrollTrigger);
 
 interface Video {
   _id: string;
@@ -59,15 +74,21 @@ export default function Dashboard() {
   const [videoUrl, setVideoUrl] = useState<string>('');
   const [uploadMode, setUploadMode] = useState<'file' | 'url'>('file');
   const [playingVideo, setPlayingVideo] = useState<PlaybackData | null>(null);
+  const [editingVideo, setEditingVideo] = useState<PlaybackData | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const heroRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+
+  const { scrollYProgress } = useScroll();
+  const opacity = useTransform(scrollYProgress, [0, 0.5], [1, 0]);
+  const scale = useTransform(scrollYProgress, [0, 0.5], [1, 0.8]);
 
   useEffect(() => {
     fetchVideos();
     
-    // Show onboarding for first-time users (check from videos count)
     if (videos.length === 0) {
-      // Will be set after videos are fetched
+      setShowOnboarding(true);
     }
 
     const socket = io('http://localhost:5001');
@@ -87,17 +108,15 @@ export default function Dashboard() {
       console.log(`   SubtitleS3Key type: ${typeof subtitleS3Key}`);
       console.log(`   SubtitleS3Key value: "${subtitleS3Key}"`);
       
-      // Update local state immediately with subtitleS3Key
       setVideos((prev) => prev.map(v => 
         v._id === videoId 
           ? { ...v, status: 'completed', progress: 100, subtitleS3Key: subtitleS3Key || v.subtitleS3Key } 
           : v
       ));
       
-      // Refresh videos from database to get the latest subtitleS3Key
       setTimeout(() => {
         fetchVideos();
-      }, 500); // Small delay to ensure DB is updated
+      }, 500);
       
       if (subtitleS3Key) {
         toast.success('Video processing completed! Subtitles are ready.');
@@ -117,12 +136,24 @@ export default function Dashboard() {
     };
   }, []);
 
+  // GSAP animations on mount
+  useEffect(() => {
+    if (heroRef.current) {
+      gsap.from(heroRef.current.children, {
+        opacity: 0,
+        y: 50,
+        stagger: 0.1,
+        duration: 1,
+        ease: 'power3.out',
+      });
+    }
+  }, []);
+
   const fetchVideos = async () => {
     try {
       const res = await api.get('/api/videos');
       setVideos(res.data);
       
-      // Show onboarding if no videos and first time
       if (res.data.length === 0 && !showOnboarding) {
         setShowOnboarding(true);
       }
@@ -130,6 +161,23 @@ export default function Dashboard() {
       console.error(err);
     }
   };
+
+  const onDrop = (acceptedFiles: File[]) => {
+    if (acceptedFiles.length > 0) {
+      setFile(acceptedFiles[0]);
+      setUploadProgress(0);
+      setUploadMode('file');
+    }
+  };
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: {
+      'video/*': ['.mp4', '.webm', '.mov', '.avi', '.mkv']
+    },
+    multiple: false,
+    disabled: uploading,
+  });
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -172,12 +220,24 @@ export default function Dashboard() {
           maxBodyLength: Infinity,
         });
       } else {
-        setUploadProgress(50); // URL upload is faster
+        // For URL upload, simulate progress
+        const progressInterval = setInterval(() => {
+          setUploadProgress((prev) => {
+            if (prev >= 90) {
+              clearInterval(progressInterval);
+              return 90;
+            }
+            return prev + 10;
+          });
+        }, 200);
+        
         console.log(`📤 Uploading video from URL: ${videoUrl}`);
         
         uploadRes = await api.post('/api/videos/upload-url', {
           url: videoUrl.trim(),
         });
+        
+        clearInterval(progressInterval);
         setUploadProgress(100);
       }
       
@@ -237,18 +297,52 @@ export default function Dashboard() {
         setUploadProgress(0);
         setFile(null);
         setVideoUrl('');
-      }, 1000);
+      }, 2000);
     }
   };
 
-  const handleDownload = async (subtitleKey: string) => {
+  const handleDownload = async (subtitleS3Key: string) => {
     try {
-      const filename = subtitleKey.split('/').pop(); 
-      const res = await api.get(`/api/videos/download/${filename}`);
-      window.open(res.data.url, '_blank');
-    } catch (err) {
-      console.error(err);
-      toast.error('Download failed');
+      console.log(`📥 Downloading subtitle with S3 key: ${subtitleS3Key}`);
+      
+      // Encode the S3 key to handle special characters
+      const encodedKey = encodeURIComponent(subtitleS3Key);
+      const res = await api.get(`/api/videos/download/${encodedKey}`);
+      
+      if (res.data.url) {
+        console.log(`✅ Got download URL, fetching file as blob`);
+        
+        // Fetch the file as a blob to ensure download instead of opening in browser
+        const response = await fetch(res.data.url);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch subtitle: ${response.statusText}`);
+        }
+        
+        const blob = await response.blob();
+        const filename = res.data.filename || subtitleS3Key.split('/').pop() || 'subtitle.ass';
+        
+        // Create a blob URL and trigger download
+        const blobUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        // Clean up the blob URL after a short delay
+        setTimeout(() => {
+          window.URL.revokeObjectURL(blobUrl);
+        }, 100);
+        
+        toast.success('Subtitle downloaded successfully!');
+      } else {
+        throw new Error('No download URL received');
+      }
+    } catch (err: any) {
+      console.error('❌ Download error:', err);
+      const errorMessage = err.response?.data?.message || err.message || 'Download failed';
+      toast.error(`Failed to download subtitle: ${errorMessage}`);
     }
   };
 
@@ -256,7 +350,6 @@ export default function Dashboard() {
     try {
       console.log(`📥 Fetching playback URLs for video: ${videoId}`);
       
-      // First, get the video from the list to check subtitleS3Key
       const video = videos.find(v => v._id === videoId);
       console.log(`   Video from state:`, video);
       console.log(`   Video subtitleS3Key:`, video?.subtitleS3Key);
@@ -267,7 +360,6 @@ export default function Dashboard() {
       console.log('   Subtitle URL type:', typeof res.data.subtitleUrl);
       console.log('   Subtitle URL value:', res.data.subtitleUrl);
       
-      // Handle subtitle URL - check for null, undefined, or string "null"
       let subtitleUrl: string | null = null;
       if (res.data.subtitleUrl && 
           res.data.subtitleUrl !== 'null' && 
@@ -286,8 +378,6 @@ export default function Dashboard() {
       });
       
       if (!subtitleUrl) {
-        console.warn('⚠️  No subtitle URL provided for video');
-        // Check if video has subtitleS3Key but URL generation failed
         if (video?.subtitleS3Key) {
           toast.warning('Subtitles exist but URL generation failed. Please try again.');
         } else {
@@ -299,6 +389,22 @@ export default function Dashboard() {
     } catch (err: any) {
       console.error('❌ Failed to load video:', err);
       toast.error(err.response?.data?.message || 'Failed to load video');
+    }
+  };
+
+  const handleEditVideo = async (videoId: string) => {
+    try {
+      const res = await api.get(`/api/videos/playback/${videoId}`);
+      const subtitleUrl = res.data.subtitleUrl === 'null' || res.data.subtitleUrl === null ? null : res.data.subtitleUrl;
+      
+      setEditingVideo({
+        videoUrl: res.data.videoUrl,
+        subtitleUrl: subtitleUrl,
+        docId: res.data.docId,
+        title: res.data.title,
+      });
+    } catch (err: any) {
+      toast.error('Failed to load video for editing');
     }
   };
 
@@ -319,334 +425,393 @@ export default function Dashboard() {
   const completedVideos = videos.filter(v => v.status === 'completed');
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
-      {/* Subtle animated background */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none opacity-20">
-        <div className="absolute top-0 left-1/4 w-96 h-96 bg-blue-500 rounded-full blur-3xl animate-pulse" />
-        <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-purple-500 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
-      </div>
-
-      <div className="relative z-10 p-6 md:p-8 lg:p-12 max-w-7xl mx-auto">
-        {playingVideo ? (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.3 }}
-            className="mb-8"
-          >
-            <VideoPlayer
-              videoUrl={playingVideo.videoUrl}
-              subtitleUrl={playingVideo.subtitleUrl}
-              title={playingVideo.title}
-              onClose={() => setPlayingVideo(null)}
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-black text-white relative overflow-hidden">
+        <ThreeBackground />
+        
+        <div ref={containerRef} className="relative z-10">
+          {playingVideo ? (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.3 }}
+              className="p-6 md:p-8 lg:p-12"
+            >
+              <VideoPlayer
+                videoUrl={playingVideo.videoUrl}
+                subtitleUrl={playingVideo.subtitleUrl}
+                title={playingVideo.title}
+                onClose={() => setPlayingVideo(null)}
+              />
+            </motion.div>
+          ) : editingVideo ? (
+            <VideoEditor
+              videoUrl={editingVideo.videoUrl}
+              onClose={() => setEditingVideo(null)}
             />
-          </motion.div>
-        ) : (
-          <>
-            {/* Header */}
-            <div className="flex justify-between items-center mb-8">
-              <div>
-                <h1 className="text-3xl md:text-4xl font-bold mb-2 text-white">
-                  Welcome back, {user?.username}
-                </h1>
-                <p className="text-slate-400">AI-powered video subtitle generation</p>
-              </div>
-              <Button 
-                onClick={logout} 
-                variant="outline"
-                className="bg-slate-800/50 hover:bg-slate-700/50 border-slate-700 text-white"
+          ) : (
+            <div className="p-6 md:p-8 lg:p-12 max-w-7xl mx-auto">
+              {/* Hero Section */}
+              <motion.div
+                ref={heroRef}
+                style={{ opacity, scale }}
+                className="mb-16 text-center"
               >
-                <LogOut className="w-4 h-4 mr-2" />
-                Logout
-              </Button>
-            </div>
-
-            {/* Onboarding Modal */}
-            <AnimatePresence>
-              {showOnboarding && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-                  onClick={() => {
-                    setShowOnboarding(false);
-                  }}
+                <motion.h1
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.8 }}
+                  className="text-5xl md:text-7xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400"
                 >
+                  Transform Videos with AI
+                </motion.h1>
+                <motion.p
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.8, delay: 0.2 }}
+                  className="text-xl text-slate-400 max-w-2xl mx-auto"
+                >
+                  Professional video editing, AI-powered subtitles, and seamless workflow
+                </motion.p>
+              </motion.div>
+
+              {/* Onboarding */}
+              <AnimatePresence>
+                {showOnboarding && (
                   <motion.div
-                    initial={{ scale: 0.9, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0.9, opacity: 0 }}
-                    onClick={(e) => e.stopPropagation()}
-                    className="bg-slate-900 border border-slate-700 rounded-2xl p-8 max-w-2xl w-full shadow-2xl"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                    onClick={() => setShowOnboarding(false)}
                   >
-                    <div className="flex justify-between items-start mb-6">
-                      <h2 className="text-2xl font-bold text-white">Welcome to Genio AI</h2>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setShowOnboarding(false);
-                      }}
-                      className="text-slate-400 hover:text-white"
+                    <motion.div
+                      initial={{ scale: 0.9, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 0.9, opacity: 0 }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="bg-slate-900 border border-slate-700 rounded-2xl p-8 max-w-2xl w-full shadow-2xl"
                     >
-                      <X className="w-5 h-5" />
-                    </Button>
-                    </div>
-                    
-                    <div className="space-y-6">
-                      <div className="flex items-start gap-4">
-                        <div className="p-3 bg-blue-500/20 rounded-lg">
-                          <Upload className="w-6 h-6 text-blue-400" />
+                      <div className="flex justify-between items-start mb-6">
+                        <h2 className="text-2xl font-bold text-white">Welcome to Genio AI</h2>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setShowOnboarding(false)}
+                          className="text-slate-400 hover:text-white"
+                        >
+                          <X className="w-5 h-5" />
+                        </Button>
+                      </div>
+                      
+                      <div className="space-y-6">
+                        <div className="flex items-start gap-4">
+                          <div className="p-3 bg-blue-500/20 rounded-lg">
+                            <Upload className="w-6 h-6 text-blue-400" />
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-white mb-1">1. Upload Your Video</h3>
+                            <p className="text-slate-400 text-sm">Drag & drop or paste a URL to get started</p>
+                          </div>
                         </div>
-                        <div>
-                          <h3 className="font-semibold text-white mb-1">1. Upload Your Video</h3>
-                          <p className="text-slate-400 text-sm">Upload a video file or paste a URL to get started</p>
+                        
+                        <div className="flex items-start gap-4">
+                          <div className="p-3 bg-purple-500/20 rounded-lg">
+                            <Sparkles className="w-6 h-6 text-purple-400" />
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-white mb-1">2. AI Generates Subtitles</h3>
+                            <p className="text-slate-400 text-sm">Watch as AI automatically transcribes your video</p>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-start gap-4">
+                          <div className="p-3 bg-green-500/20 rounded-lg">
+                            <Play className="w-6 h-6 text-green-400" />
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-white mb-1">3. Edit & Export</h3>
+                            <p className="text-slate-400 text-sm">Crop, trim, add effects, and export your video</p>
+                          </div>
                         </div>
                       </div>
                       
-                      <div className="flex items-start gap-4">
-                        <div className="p-3 bg-purple-500/20 rounded-lg">
-                          <Sparkles className="w-6 h-6 text-purple-400" />
-                        </div>
-                        <div>
-                          <h3 className="font-semibold text-white mb-1">2. AI Generates Subtitles</h3>
-                          <p className="text-slate-400 text-sm">Our AI automatically transcribes and generates accurate subtitles</p>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-start gap-4">
-                        <div className="p-3 bg-green-500/20 rounded-lg">
-                          <Play className="w-6 h-6 text-green-400" />
-                        </div>
-                        <div>
-                          <h3 className="font-semibold text-white mb-1">3. Watch with Subtitles</h3>
-                          <p className="text-slate-400 text-sm">Play your video with synchronized subtitles and download them</p>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <Button
-                      onClick={() => {
-                        setShowOnboarding(false);
-                        localStorage.setItem('hasSeenOnboarding', 'true');
-                      }}
-                      className="w-full mt-8 bg-blue-600 hover:bg-blue-700 text-white"
-                    >
-                      Get Started
-                      <ArrowRight className="w-4 h-4 ml-2" />
-                    </Button>
+                      <Button
+                        onClick={() => setShowOnboarding(false)}
+                        className="w-full mt-8 bg-blue-600 hover:bg-blue-700 text-white"
+                      >
+                        Get Started
+                        <ArrowRight className="w-4 h-4 ml-2" />
+                      </Button>
+                    </motion.div>
                   </motion.div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+                )}
+              </AnimatePresence>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-              {/* Upload Section */}
-              <div className="lg:col-span-2">
-                <Card className="bg-slate-800/50 backdrop-blur-sm border-slate-700 shadow-xl">
-                  <CardHeader className="border-b border-slate-700">
-                    <CardTitle className="text-xl font-semibold text-white flex items-center gap-2">
-                      <Upload className="w-5 h-5 text-blue-400" />
-                      Upload Video
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="pt-6 space-y-6">
-                    <div className="flex gap-2">
-                      <Button
-                        variant={uploadMode === 'file' ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => setUploadMode('file')}
-                        className={`flex-1 ${
-                          uploadMode === 'file'
-                            ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                            : 'bg-slate-700/50 hover:bg-slate-700 border-slate-600 text-slate-300'
-                        }`}
-                      >
-                        <FileVideo className="w-4 h-4 mr-2" />
-                        File
-                      </Button>
-                      <Button
-                        variant={uploadMode === 'url' ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => setUploadMode('url')}
-                        className={`flex-1 ${
-                          uploadMode === 'url'
-                            ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                            : 'bg-slate-700/50 hover:bg-slate-700 border-slate-600 text-slate-300'
-                        }`}
-                      >
-                        <LinkIcon className="w-4 h-4 mr-2" />
-                        URL
-                      </Button>
-                    </div>
-                    
-                    {uploadMode === 'file' ? (
-                      <div className="space-y-2">
-                        <Label className="text-slate-300">Video File</Label>
-                        <Input 
-                          type="file" 
-                          onChange={handleFileChange} 
-                          accept="video/*"
-                          className="bg-slate-900/50 border-slate-600 text-white file:bg-blue-600 file:text-white file:border-0 file:rounded file:px-4 file:py-2"
-                        />
-                        {file && (
-                          <p className="text-sm text-slate-400 flex items-center gap-2">
-                            <FileCheck className="w-4 h-4 text-green-400" />
-                            {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
-                          </p>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        <Label className="text-slate-300">Video URL</Label>
-                        <Input
-                          type="url"
-                          placeholder="https://example.com/video.mp4"
-                          value={videoUrl}
-                          onChange={(e) => setVideoUrl(e.target.value)}
-                          className="bg-slate-900/50 border-slate-600 text-white placeholder:text-slate-500"
-                        />
-                      </div>
-                    )}
+              {/* Header */}
+              <div className="flex justify-between items-center mb-12">
+                <div>
+                  <h2 className="text-2xl md:text-3xl font-bold mb-2 text-white">
+                    Welcome back, {user?.username}
+                  </h2>
+                  <p className="text-slate-400">Ready to create something amazing?</p>
+                </div>
+                <Button 
+                  onClick={logout} 
+                  variant="outline"
+                  className="bg-slate-800/50 hover:bg-slate-700/50 border-slate-700 text-white"
+                >
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Logout
+                </Button>
+              </div>
 
-                    {/* Upload Progress */}
-                    {uploading && (
-                      <div className="space-y-2">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-slate-400">Uploading...</span>
-                          <span className="text-slate-300 font-medium">{uploadProgress}%</span>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-12">
+                {/* Upload Section */}
+                <div className="lg:col-span-2 space-y-6">
+                  <Card className="bg-slate-900/80 backdrop-blur-xl border-slate-700/50 shadow-2xl">
+                    <CardHeader className="border-b border-slate-700/50">
+                      <CardTitle className="text-xl font-semibold text-white flex items-center gap-2">
+                        <Upload className="w-5 h-5 text-blue-400" />
+                        Upload Video
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-6 space-y-6">
+                      <div className="flex gap-2">
+                        <Button
+                          variant={uploadMode === 'file' ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setUploadMode('file')}
+                          className={`flex-1 ${
+                            uploadMode === 'file'
+                              ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                              : 'bg-slate-800/50 hover:bg-slate-700/50 border-slate-600 text-slate-300'
+                          }`}
+                        >
+                          <FileVideo className="w-4 h-4 mr-2" />
+                          File
+                        </Button>
+                        <Button
+                          variant={uploadMode === 'url' ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setUploadMode('url')}
+                          className={`flex-1 ${
+                            uploadMode === 'url'
+                              ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                              : 'bg-slate-800/50 hover:bg-slate-700/50 border-slate-600 text-slate-300'
+                          }`}
+                        >
+                          <LinkIcon className="w-4 h-4 mr-2" />
+                          URL
+                        </Button>
+                      </div>
+                      
+                      {uploadMode === 'file' ? (
+                        <div className="space-y-4">
+                          <div
+                            {...getRootProps()}
+                            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all ${
+                              isDragActive
+                                ? 'border-blue-500 bg-blue-500/10'
+                                : 'border-slate-700 hover:border-slate-600 bg-slate-800/30'
+                            }`}
+                          >
+                            <input {...getInputProps()} />
+                            <Upload className="w-12 h-12 mx-auto mb-4 text-slate-400" />
+                            <p className="text-slate-300 mb-2">
+                              {isDragActive ? 'Drop the video here' : 'Drag & drop video here'}
+                            </p>
+                            <p className="text-sm text-slate-500">or click to browse</p>
+                            {file && (
+                              <motion.div
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="mt-4 p-3 bg-slate-800/50 rounded-lg"
+                              >
+                                <div className="flex items-center gap-2 text-sm text-slate-300">
+                                  <FileCheck className="w-4 h-4 text-green-400" />
+                                  {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
+                                </div>
+                              </motion.div>
+                            )}
+                          </div>
                         </div>
-                        <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
-                          <motion.div
-                            initial={{ width: 0 }}
-                            animate={{ width: `${uploadProgress}%` }}
-                            className="h-full bg-gradient-to-r from-blue-500 to-purple-500"
+                      ) : (
+                        <div className="space-y-2">
+                          <Label className="text-slate-300">Video URL</Label>
+                          <Input
+                            type="url"
+                            placeholder="https://example.com/video.mp4"
+                            value={videoUrl}
+                            onChange={(e) => setVideoUrl(e.target.value)}
+                            className="bg-slate-800/50 border-slate-600 text-white placeholder:text-slate-500"
                           />
                         </div>
-                      </div>
-                    )}
-                    
-                    <Button 
-                      onClick={handleUpload} 
-                      disabled={uploading}
-                      className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-                    >
-                      {uploading ? (
-                        <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Uploading...
-                        </>
-                      ) : (
-                        <>
-                          <Upload className="w-4 h-4 mr-2" />
-                          Upload & Generate Subtitles
-                        </>
                       )}
-                    </Button>
-                  </CardContent>
-                </Card>
 
-                {/* Processing Videos */}
-                {processingVideos.length > 0 && (
-                  <Card className="bg-slate-800/50 backdrop-blur-sm border-slate-700 shadow-xl mt-6">
-                    <CardHeader className="border-b border-slate-700">
+                      {/* Real-time Upload Progress */}
+                      {uploading && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          className="space-y-2"
+                        >
+                          <div className="flex justify-between text-sm">
+                            <span className="text-slate-400">Uploading...</span>
+                            <span className="text-slate-300 font-medium">{uploadProgress}%</span>
+                          </div>
+                          <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden relative">
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${uploadProgress}%` }}
+                              transition={{ duration: 0.3, ease: 'easeOut' }}
+                              className="h-full bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 rounded-full relative"
+                            >
+                              <motion.div
+                                animate={{
+                                  x: ['-100%', '100%'],
+                                }}
+                                transition={{
+                                  duration: 1.5,
+                                  repeat: Infinity,
+                                  ease: 'linear',
+                                }}
+                                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent"
+                              />
+                            </motion.div>
+                          </div>
+                        </motion.div>
+                      )}
+                      
+                      <Button 
+                        onClick={handleUpload} 
+                        disabled={uploading}
+                        className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg shadow-blue-500/50"
+                      >
+                        {uploading ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Uploading {uploadProgress}%...
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="w-4 h-4 mr-2" />
+                            Upload & Generate Subtitles
+                          </>
+                        )}
+                      </Button>
+                    </CardContent>
+                  </Card>
+
+                  {/* Processing Videos */}
+                  {processingVideos.length > 0 && (
+                    <Card className="bg-slate-900/80 backdrop-blur-xl border-slate-700/50 shadow-2xl">
+                      <CardHeader className="border-b border-slate-700/50">
+                        <CardTitle className="text-xl font-semibold text-white flex items-center gap-2">
+                          <Sparkles className="w-5 h-5 text-purple-400 animate-pulse" />
+                          Generating Subtitles
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="pt-6">
+                        {processingVideos.map((video) => (
+                          <div key={video._id} className="mb-6 last:mb-0">
+                            <div className="flex items-center justify-between mb-3">
+                              <span className="text-sm font-medium text-slate-300">{video.title}</span>
+                              <span className="text-sm text-slate-400">{video.progress || 0}%</span>
+                            </div>
+                            <SubtitleGenerationAnimation 
+                              progress={video.progress || 0} 
+                              status={video.status}
+                            />
+                          </div>
+                        ))}
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+
+                {/* Video Library */}
+                <div>
+                  <Card className="bg-slate-900/80 backdrop-blur-xl border-slate-700/50 shadow-2xl h-full">
+                    <CardHeader className="border-b border-slate-700/50">
                       <CardTitle className="text-xl font-semibold text-white flex items-center gap-2">
-                        <Sparkles className="w-5 h-5 text-purple-400 animate-pulse" />
-                        Generating Subtitles
+                        <Video className="w-5 h-5 text-blue-400" />
+                        Your Videos ({videos.length})
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="pt-6">
-                      {processingVideos.map((video) => (
-                        <div key={video._id} className="mb-6 last:mb-0">
-                          <div className="flex items-center justify-between mb-3">
-                            <span className="text-sm font-medium text-slate-300">{video.title}</span>
-                            <span className="text-sm text-slate-400">{video.progress || 0}%</span>
-                          </div>
-                          <SubtitleGenerationAnimation 
-                            progress={video.progress || 0} 
-                            status={video.status}
-                          />
+                      {videos.length === 0 ? (
+                        <div className="text-center py-12 text-slate-400">
+                          <Video className="w-16 h-16 mx-auto mb-4 opacity-30" />
+                          <p>No videos yet. Upload your first video!</p>
                         </div>
-                      ))}
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
-
-              {/* Video Library */}
-              <div>
-                <Card className="bg-slate-800/50 backdrop-blur-sm border-slate-700 shadow-xl h-full">
-                  <CardHeader className="border-b border-slate-700">
-                    <CardTitle className="text-xl font-semibold text-white flex items-center gap-2">
-                      <Video className="w-5 h-5 text-blue-400" />
-                      Your Videos
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="pt-6">
-                    {videos.length === 0 ? (
-                      <div className="text-center py-12 text-slate-400">
-                        <Video className="w-16 h-16 mx-auto mb-4 opacity-30" />
-                        <p>No videos yet. Upload your first video!</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
-                        {videos.map((video) => (
-                          <motion.div
-                            key={video._id}
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="bg-slate-900/50 border border-slate-700 rounded-lg p-4 hover:border-slate-600 transition-colors"
-                          >
-                            <div className="flex items-start justify-between gap-3 mb-2">
-                              <div className="flex items-center gap-2 flex-1 min-w-0">
-                                {getStatusIcon(video.status)}
-                                <h3 className="font-medium text-white truncate text-sm">{video.title}</h3>
+                      ) : (
+                        <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+                          {videos.map((video) => (
+                            <motion.div
+                              key={video._id}
+                              initial={{ opacity: 0, y: 10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              whileHover={{ scale: 1.02 }}
+                              className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 hover:border-blue-500/50 transition-all group"
+                            >
+                              <div className="flex items-start justify-between gap-3 mb-2">
+                                <div className="flex items-center gap-2 flex-1 min-w-0">
+                                  {getStatusIcon(video.status)}
+                                  <h3 className="font-medium text-white truncate text-sm">{video.title}</h3>
+                                </div>
                               </div>
-                            </div>
-                            
-                            <div className="flex items-center justify-between mt-3">
-                              <span className="text-xs text-slate-400 flex items-center gap-1">
-                                <Clock className="w-3 h-3" />
-                                {new Date(video.createdAt).toLocaleDateString()}
-                              </span>
                               
-                              {video.status === 'completed' && (
-                                <div className="flex gap-2">
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => handleViewVideo(video._id)}
-                                    className="bg-blue-600/20 hover:bg-blue-600/30 border-blue-500/50 text-blue-300 text-xs px-2 py-1 h-auto"
-                                  >
-                                    <Play className="w-3 h-3 mr-1" />
-                                    Play
-                                  </Button>
-                                  {video.subtitleS3Key && (
+                              <div className="flex items-center justify-between mt-3">
+                                <span className="text-xs text-slate-400 flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  {new Date(video.createdAt).toLocaleDateString()}
+                                </span>
+                                
+                                {video.status === 'completed' && (
+                                  <div className="flex gap-2">
                                     <Button
                                       variant="outline"
                                       size="sm"
-                                      onClick={() => handleDownload(video.subtitleS3Key!)}
-                                      className="bg-slate-700/50 hover:bg-slate-700 border-slate-600 text-slate-300 text-xs px-2 py-1 h-auto"
+                                      onClick={() => handleViewVideo(video._id)}
+                                      className="bg-blue-600/20 hover:bg-blue-600/30 border-blue-500/50 text-blue-300 text-xs px-2 py-1 h-auto"
                                     >
-                                      <Download className="w-3 h-3" />
+                                      <Play className="w-3 h-3 mr-1" />
+                                      Play
                                     </Button>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          </motion.div>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => handleEditVideo(video._id)}
+                                      className="bg-purple-600/20 hover:bg-purple-600/30 border-purple-500/50 text-purple-300 text-xs px-2 py-1 h-auto"
+                                    >
+                                      <Edit3 className="w-3 h-3 mr-1" />
+                                      Edit
+                                    </Button>
+                                    {video.subtitleS3Key && (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleDownload(video.subtitleS3Key!)}
+                                        className="bg-slate-700/50 hover:bg-slate-700 border-slate-600 text-slate-300 text-xs px-2 py-1 h-auto"
+                                      >
+                                        <Download className="w-3 h-3" />
+                                      </Button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </motion.div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
               </div>
             </div>
-          </>
-        )}
-      </div>
+          )}
+        </div>
     </div>
   );
 }

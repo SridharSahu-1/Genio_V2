@@ -584,16 +584,49 @@ export const verifyUpload = async (req: FastifyRequest, reply: FastifyReply) => 
 export const getSubtitleDownloadUrl = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const { key } = req.params as { key: string };
-    const subtitlePath = path.resolve(__dirname, `../../client/public/subtitles/${key}`);
+    const userId = (req.user as any).id;
 
-    if (fs.existsSync(subtitlePath)) {
-      const fileStream = fs.createReadStream(subtitlePath);
-      reply.type('text/plain');
-      reply.send(fileStream);
+    // Decode the key (it might be URL encoded)
+    const decodedKey = decodeURIComponent(key);
+    console.log(`📥 Requesting subtitle download`);
+    console.log(`   Encoded key: ${key}`);
+    console.log(`   Decoded key: ${decodedKey}`);
+    console.log(`   User ID: ${userId}`);
+
+    // Try to find video by subtitleS3Key (exact match or contains)
+    const video = await Video.findOne({ 
+      $or: [
+        { subtitleS3Key: decodedKey },
+        { subtitleS3Key: { $regex: decodedKey.split('/').pop() || decodedKey } }
+      ],
+      user: userId 
+    });
+
+    let subtitleS3Key: string;
+
+    if (video && video.subtitleS3Key) {
+      subtitleS3Key = video.subtitleS3Key;
+      console.log(`   Found video: ${video._id}`);
+      console.log(`   Using subtitle S3 Key: ${subtitleS3Key}`);
     } else {
-      return reply.code(404).send({ message: 'Subtitle not found' });
+      // Try using the decoded key directly (might be the full S3 key)
+      subtitleS3Key = decodedKey;
+      console.log(`   Video not found, trying direct S3 key: ${subtitleS3Key}`);
+    }
+
+    // Generate presigned URL for S3 subtitle with Content-Disposition header to force download
+    try {
+      const filename = subtitleS3Key.split('/').pop() || 'subtitle.ass';
+      const subtitleUrl = await getPresignedUrl(subtitleS3Key, 3600, true, filename); // 1 hour expiry, force download
+      console.log(`✅ Generated presigned download URL for subtitle: ${subtitleS3Key}`);
+      return reply.send({ url: subtitleUrl, filename });
+    } catch (error: any) {
+      console.error(`❌ Failed to generate presigned URL: ${error.message}`);
+      console.error(`   Attempted S3 key: ${subtitleS3Key}`);
+      return reply.code(404).send({ message: `Subtitle not found: ${error.message}` });
     }
   } catch (error: any) {
+    console.error(`❌ Error in getSubtitleDownloadUrl:`, error);
     reply.code(500).send({ message: error.message });
   }
 };
