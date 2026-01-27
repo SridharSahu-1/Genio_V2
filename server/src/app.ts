@@ -3,6 +3,8 @@ import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
 import multipart from '@fastify/multipart';
 import dotenv from 'dotenv';
+import mongoose from 'mongoose';
+import Redis from 'ioredis';
 import { connectDB } from './config/db';
 import authRoutes from './routes/authRoutes';
 import videoRoutes from './routes/videoRoutes';
@@ -15,13 +17,43 @@ dotenv.config();
 const app = Fastify({ logger: true });
 
 // Plugins
+// CORS configuration - allow specific origins in production
+const allowedOrigins = process.env.CORS_ORIGINS 
+  ? process.env.CORS_ORIGINS.split(',').map(origin => origin.trim())
+  : ['http://localhost:3000', 'http://localhost:3001'];
+
 app.register(cors, { 
-  origin: true, // Allows all origins by reflecting the origin header
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // In development, allow all origins
+    if (process.env.NODE_ENV === 'development') {
+      return callback(null, true);
+    }
+    
+    // In production, check against allowed origins
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'), false);
+    }
+  },
   credentials: true
 });
 
+// Validate JWT secret
+const jwtSecret = process.env.JWT_SECRET;
+if (!jwtSecret || jwtSecret === 'secret') {
+  console.error('⚠️  WARNING: JWT_SECRET is not set or using default value. This is a security risk!');
+  if (process.env.NODE_ENV === 'production') {
+    console.error('❌ Cannot start in production without a secure JWT_SECRET');
+    process.exit(1);
+  }
+}
+
 app.register(jwt, {
-  secret: process.env.JWT_SECRET || 'secret'
+  secret: jwtSecret || 'secret'
 });
 
 app.register(multipart, {
@@ -41,9 +73,67 @@ app.get('/', async (request, reply) => {
   return { status: 'ok', message: 'Genio V2 API is running' };
 });
 
+// Health check endpoint
+app.get('/health', async (request, reply) => {
+  try {
+    // Check database connection
+    const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+    
+    // Check Redis connection
+    let redisStatus = 'unknown';
+    try {
+      const redisClient = new Redis({
+        host: process.env.REDIS_HOST || 'localhost',
+        port: parseInt(process.env.REDIS_PORT || '6379'),
+        connectTimeout: 2000,
+        lazyConnect: true,
+      });
+      await redisClient.connect();
+      await redisClient.ping();
+      redisStatus = 'connected';
+      redisClient.disconnect();
+    } catch (err: any) {
+      redisStatus = 'disconnected';
+    }
+    
+    const isHealthy = dbStatus === 'connected' && redisStatus === 'connected';
+    
+    if (!isHealthy) {
+      reply.code(503);
+    }
+    
+    return {
+      status: isHealthy ? 'ok' : 'degraded',
+      timestamp: new Date().toISOString(),
+      services: {
+        database: dbStatus,
+        redis: redisStatus,
+      },
+      environment: process.env.NODE_ENV || 'development',
+    };
+  } catch (error: any) {
+    reply.code(503).send({
+      status: 'error',
+      message: error.message,
+    });
+  }
+});
+
 const start = async () => {
   try {
     const port = parseInt(process.env.PORT || '5001');
+    
+    // Validate required environment variables
+    const requiredEnvVars = ['MONGO_URI', 'JWT_SECRET', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_S3_BUCKET'];
+    const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+    
+    if (missingVars.length > 0 && process.env.NODE_ENV === 'production') {
+      console.error(`❌ Missing required environment variables: ${missingVars.join(', ')}`);
+      process.exit(1);
+    } else if (missingVars.length > 0) {
+      console.warn(`⚠️  Missing environment variables (development mode): ${missingVars.join(', ')}`);
+    }
+    
     await app.ready(); // Wait for plugins
     
     // Check if S3 bucket exists (non-blocking)

@@ -4,9 +4,10 @@ const videoSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   title: { type: String, required: true },
   originalKey: { type: String, required: true }, // Local file path or S3 key
-  s3Key: { type: String }, // S3 key (optional, for videos uploaded to S3)
-  videoUrl: { type: String }, // Public S3 URL for direct access
-  subtitleKey: { type: String },
+  s3Key: { type: String }, // S3 key for video (optional, for videos uploaded to S3)
+  subtitleKey: { type: String }, // Local subtitle path (legacy)
+  subtitleS3Key: { type: String }, // S3 key for subtitle file
+  videoUrl: { type: String }, // Public S3 URL for direct access (legacy)
   docId: { type: String, unique: true, sparse: true }, // Unique identifier for linking video and subtitle
   status: { type: String, enum: ['pending', 'processing', 'completed', 'failed'], default: 'pending' },
   progress: { type: Number, default: 0 },

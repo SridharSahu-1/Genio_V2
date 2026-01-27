@@ -1,12 +1,12 @@
 import { FastifyInstance } from 'fastify';
-import { initUpload, startProcessing, getVideos, getSubtitleDownloadUrl, getVideoPlaybackUrl, verifyUpload, directUpload, uploadFromUrl, serveVideoFile } from '../controllers/videoController';
+import { initUpload, startProcessing, getVideos, getSubtitleDownloadUrl, getVideoPlaybackUrl, verifyUpload, directUpload, uploadFromUrl, serveVideoFile, serveSubtitleFile } from '../controllers/videoController';
 
 export default async function videoRoutes(fastify: FastifyInstance) {
   fastify.addHook('onRequest', async (request, reply) => {
     try {
       await request.jwtVerify();
-    } catch (err) {
-      reply.send(err);
+    } catch (err: any) {
+      reply.code(401).send({ message: 'Unauthorized: Invalid or missing token' });
     }
   });
 
@@ -24,6 +24,7 @@ export default async function videoRoutes(fastify: FastifyInstance) {
   fastify.get('/download/:key', getSubtitleDownloadUrl);
   fastify.get('/playback/:videoId', getVideoPlaybackUrl);
   fastify.get('/file/:videoId', serveVideoFile);
+  fastify.get('/subtitle/:videoId', serveSubtitleFile);
 }
 
 
