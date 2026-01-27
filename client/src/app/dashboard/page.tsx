@@ -65,7 +65,7 @@ interface PlaybackData {
 }
 
 export default function Dashboard() {
-  const { user, logout } = useAuth();
+  const { user, logout, isLoading } = useAuth();
   const [videos, setVideos] = useState<Video[]>([]);
   const [logs, setLogs] = useState<Record<string, string[]>>({});
   const [uploading, setUploading] = useState(false);
@@ -84,14 +84,20 @@ export default function Dashboard() {
   const opacity = useTransform(scrollYProgress, [0, 0.5], [1, 0]);
   const scale = useTransform(scrollYProgress, [0, 0.5], [1, 0.8]);
 
+  // Redirect to login if not authenticated
   useEffect(() => {
-    fetchVideos();
-    
-    if (videos.length === 0) {
-      setShowOnboarding(true);
+    if (!isLoading && !user) {
+      router.push('/login');
     }
+  }, [user, isLoading, router]);
 
-    const socket = io('http://localhost:5001');
+  useEffect(() => {
+    // Only fetch videos if user is authenticated
+    if (!user || isLoading) return;
+    
+    fetchVideos();
+
+    const socket = io(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001');
 
     socket.on('video-progress', ({ videoId, progress, message }) => {
       setVideos((prev) => prev.map(v => v._id === videoId ? { ...v, status: 'processing', progress } : v));
@@ -157,8 +163,12 @@ export default function Dashboard() {
       if (res.data.length === 0 && !showOnboarding) {
         setShowOnboarding(true);
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error('Failed to fetch videos:', err);
+      // Error handling is done by api interceptor for 401
+      if (err.response?.status !== 401) {
+        toast.error('Failed to load videos');
+      }
     }
   };
 
@@ -421,8 +431,27 @@ export default function Dashboard() {
     }
   };
 
+  // Show loading state while checking auth
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-black">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto"></div>
+          <p className="mt-4 text-gray-300">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Don't render if not authenticated (redirect will happen)
+  if (!user) {
+    return null;
+  }
+
   const processingVideos = videos.filter(v => v.status === 'processing');
   const completedVideos = videos.filter(v => v.status === 'completed');
+  const pendingVideos = videos.filter(v => v.status === 'pending');
+  const failedVideos = videos.filter(v => v.status === 'failed');
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-black text-white relative overflow-hidden">
@@ -548,61 +577,129 @@ export default function Dashboard() {
                 )}
               </AnimatePresence>
 
-              {/* Header */}
-              <div className="flex justify-between items-center mb-12">
-                <div>
-                  <h2 className="text-2xl md:text-3xl font-bold mb-2 text-white">
-                    Welcome back, {user?.username}
-                  </h2>
-                  <p className="text-slate-400">Ready to create something amazing?</p>
+              {/* Modern Header */}
+              <div className="mb-8">
+                <div className="flex justify-between items-start mb-6">
+                  <div>
+                    <motion.h1
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="text-3xl md:text-4xl font-bold mb-2 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400"
+                    >
+                      Welcome back, {user?.username}
+                    </motion.h1>
+                    <p className="text-slate-400">Transform your videos with AI-powered subtitles</p>
+                  </div>
+                  <Button 
+                    onClick={logout} 
+                    variant="outline"
+                    className="bg-slate-900/50 hover:bg-slate-800/50 border-slate-700 text-slate-300 hover:text-white backdrop-blur-sm"
+                  >
+                    <LogOut className="w-4 h-4 mr-2" />
+                    Logout
+                  </Button>
                 </div>
-                <Button 
-                  onClick={logout} 
-                  variant="outline"
-                  className="bg-slate-800/50 hover:bg-slate-700/50 border-slate-700 text-white"
-                >
-                  <LogOut className="w-4 h-4 mr-2" />
-                  Logout
-                </Button>
+
+                {/* Stats Cards */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.1 }}
+                    className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/50 rounded-xl p-4 hover:border-blue-500/50 transition-all"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <Video className="w-5 h-5 text-blue-400" />
+                      <span className="text-2xl font-bold text-white">{videos.length}</span>
+                    </div>
+                    <p className="text-xs text-slate-400">Total Videos</p>
+                  </motion.div>
+                  
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.2 }}
+                    className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/50 rounded-xl p-4 hover:border-green-500/50 transition-all"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <CheckCircle2 className="w-5 h-5 text-green-400" />
+                      <span className="text-2xl font-bold text-white">{completedVideos.length}</span>
+                    </div>
+                    <p className="text-xs text-slate-400">Completed</p>
+                  </motion.div>
+                  
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.3 }}
+                    className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/50 rounded-xl p-4 hover:border-purple-500/50 transition-all"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <Loader2 className="w-5 h-5 text-purple-400 animate-spin" />
+                      <span className="text-2xl font-bold text-white">{processingVideos.length}</span>
+                    </div>
+                    <p className="text-xs text-slate-400">Processing</p>
+                  </motion.div>
+                  
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.4 }}
+                    className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/50 rounded-xl p-4 hover:border-red-500/50 transition-all"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <XCircle className="w-5 h-5 text-red-400" />
+                      <span className="text-2xl font-bold text-white">{failedVideos.length}</span>
+                    </div>
+                    <p className="text-xs text-slate-400">Failed</p>
+                  </motion.div>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-12">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
                 {/* Upload Section */}
                 <div className="lg:col-span-2 space-y-6">
-                  <Card className="bg-slate-900/80 backdrop-blur-xl border-slate-700/50 shadow-2xl">
-                    <CardHeader className="border-b border-slate-700/50">
-                      <CardTitle className="text-xl font-semibold text-white flex items-center gap-2">
-                        <Upload className="w-5 h-5 text-blue-400" />
-                        Upload Video
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="pt-6 space-y-6">
-                      <div className="flex gap-2">
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.2 }}
+                  >
+                    <Card className="bg-slate-900/70 backdrop-blur-2xl border-slate-800/50 shadow-2xl hover:shadow-blue-500/10 transition-all">
+                      <CardHeader className="border-b border-slate-800/50 pb-4">
+                        <CardTitle className="text-xl font-semibold text-white flex items-center gap-3">
+                          <div className="p-2 bg-blue-500/20 rounded-lg">
+                            <Upload className="w-5 h-5 text-blue-400" />
+                          </div>
+                          Upload Video
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="pt-6 space-y-6">
+                      <div className="flex gap-3 p-1 bg-slate-800/50 rounded-lg">
                         <Button
-                          variant={uploadMode === 'file' ? 'default' : 'outline'}
+                          variant="ghost"
                           size="sm"
                           onClick={() => setUploadMode('file')}
-                          className={`flex-1 ${
+                          className={`flex-1 transition-all ${
                             uploadMode === 'file'
-                              ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                              : 'bg-slate-800/50 hover:bg-slate-700/50 border-slate-600 text-slate-300'
+                              ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/50'
+                              : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
                           }`}
                         >
                           <FileVideo className="w-4 h-4 mr-2" />
-                          File
+                          File Upload
                         </Button>
                         <Button
-                          variant={uploadMode === 'url' ? 'default' : 'outline'}
+                          variant="ghost"
                           size="sm"
                           onClick={() => setUploadMode('url')}
-                          className={`flex-1 ${
+                          className={`flex-1 transition-all ${
                             uploadMode === 'url'
-                              ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                              : 'bg-slate-800/50 hover:bg-slate-700/50 border-slate-600 text-slate-300'
+                              ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/50'
+                              : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
                           }`}
                         >
                           <LinkIcon className="w-4 h-4 mr-2" />
-                          URL
+                          From URL
                         </Button>
                       </div>
                       
@@ -610,18 +707,33 @@ export default function Dashboard() {
                         <div className="space-y-4">
                           <div
                             {...getRootProps()}
-                            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all ${
+                            className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-all relative overflow-hidden group ${
                               isDragActive
-                                ? 'border-blue-500 bg-blue-500/10'
-                                : 'border-slate-700 hover:border-slate-600 bg-slate-800/30'
+                                ? 'border-blue-500 bg-blue-500/20 scale-105'
+                                : 'border-slate-700 hover:border-blue-500/50 bg-slate-800/30 hover:bg-slate-800/50'
                             }`}
                           >
                             <input {...getInputProps()} />
-                            <Upload className="w-12 h-12 mx-auto mb-4 text-slate-400" />
-                            <p className="text-slate-300 mb-2">
-                              {isDragActive ? 'Drop the video here' : 'Drag & drop video here'}
-                            </p>
-                            <p className="text-sm text-slate-500">or click to browse</p>
+                            <div className="relative z-10">
+                              <motion.div
+                                animate={isDragActive ? { scale: 1.1, rotate: 5 } : { scale: 1, rotate: 0 }}
+                                className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-2xl mb-4"
+                              >
+                                <Upload className={`w-8 h-8 ${isDragActive ? 'text-blue-400' : 'text-slate-400'}`} />
+                              </motion.div>
+                              <p className="text-slate-200 font-medium mb-2 text-lg">
+                                {isDragActive ? 'Drop your video here' : 'Drag & drop your video'}
+                              </p>
+                              <p className="text-sm text-slate-500">or click to browse files</p>
+                              <p className="text-xs text-slate-600 mt-2">Supports MP4, WebM, MOV, AVI, MKV</p>
+                            </div>
+                            {isDragActive && (
+                              <motion.div
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-purple-500/10"
+                              />
+                            )}
                             {file && (
                               <motion.div
                                 initial={{ opacity: 0, y: 10 }}
@@ -685,8 +797,8 @@ export default function Dashboard() {
                       
                       <Button 
                         onClick={handleUpload} 
-                        disabled={uploading}
-                        className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg shadow-blue-500/50"
+                        disabled={uploading || (uploadMode === 'file' && !file) || (uploadMode === 'url' && !videoUrl.trim())}
+                        className="w-full h-12 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-medium shadow-lg shadow-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                       >
                         {uploading ? (
                           <>
@@ -695,13 +807,15 @@ export default function Dashboard() {
                           </>
                         ) : (
                           <>
-                            <Upload className="w-4 h-4 mr-2" />
+                            <Sparkles className="w-4 h-4 mr-2" />
                             Upload & Generate Subtitles
+                            <ArrowRight className="w-4 h-4 ml-2" />
                           </>
                         )}
                       </Button>
                     </CardContent>
                   </Card>
+                  </motion.div>
 
                   {/* Processing Videos */}
                   {processingVideos.length > 0 && (
@@ -731,83 +845,124 @@ export default function Dashboard() {
                 </div>
 
                 {/* Video Library */}
-                <div>
-                  <Card className="bg-slate-900/80 backdrop-blur-xl border-slate-700/50 shadow-2xl h-full">
-                    <CardHeader className="border-b border-slate-700/50">
-                      <CardTitle className="text-xl font-semibold text-white flex items-center gap-2">
-                        <Video className="w-5 h-5 text-blue-400" />
-                        Your Videos ({videos.length})
+                <motion.div
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.3 }}
+                >
+                  <Card className="bg-slate-900/70 backdrop-blur-2xl border-slate-800/50 shadow-2xl h-full flex flex-col">
+                    <CardHeader className="border-b border-slate-800/50 pb-4">
+                      <CardTitle className="text-xl font-semibold text-white flex items-center gap-3">
+                        <div className="p-2 bg-purple-500/20 rounded-lg">
+                          <Video className="w-5 h-5 text-purple-400" />
+                        </div>
+                        Video Library
+                        <span className="ml-auto text-sm font-normal text-slate-400 bg-slate-800/50 px-3 py-1 rounded-full">
+                          {videos.length}
+                        </span>
                       </CardTitle>
                     </CardHeader>
-                    <CardContent className="pt-6">
+                    <CardContent className="pt-6 flex-1 overflow-hidden flex flex-col">
                       {videos.length === 0 ? (
-                        <div className="text-center py-12 text-slate-400">
-                          <Video className="w-16 h-16 mx-auto mb-4 opacity-30" />
-                          <p>No videos yet. Upload your first video!</p>
+                        <div className="text-center py-12 text-slate-400 flex-1 flex flex-col items-center justify-center">
+                          <div className="w-20 h-20 bg-slate-800/50 rounded-2xl flex items-center justify-center mb-4">
+                            <Video className="w-10 h-10 opacity-30" />
+                          </div>
+                          <p className="font-medium mb-1">No videos yet</p>
+                          <p className="text-sm">Upload your first video to get started!</p>
                         </div>
                       ) : (
                         <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
-                          {videos.map((video) => (
+                          {videos.map((video, index) => (
                             <motion.div
                               key={video._id}
                               initial={{ opacity: 0, y: 10 }}
                               animate={{ opacity: 1, y: 0 }}
-                              whileHover={{ scale: 1.02 }}
-                              className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 hover:border-blue-500/50 transition-all group"
+                              transition={{ delay: index * 0.05 }}
+                              whileHover={{ scale: 1.02, x: 4 }}
+                              className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-4 hover:border-blue-500/50 hover:bg-slate-800/70 transition-all group cursor-pointer"
+                              onClick={() => video.status === 'completed' && handleViewVideo(video._id)}
                             >
-                              <div className="flex items-start justify-between gap-3 mb-2">
-                                <div className="flex items-center gap-2 flex-1 min-w-0">
-                                  {getStatusIcon(video.status)}
-                                  <h3 className="font-medium text-white truncate text-sm">{video.title}</h3>
+                              <div className="flex items-start justify-between gap-3 mb-3">
+                                <div className="flex items-center gap-3 flex-1 min-w-0">
+                                  <div className="flex-shrink-0">
+                                    {getStatusIcon(video.status)}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <h3 className="font-medium text-white truncate text-sm mb-1">{video.title}</h3>
+                                    <span className="text-xs text-slate-500 flex items-center gap-1">
+                                      <Clock className="w-3 h-3" />
+                                      {new Date(video.createdAt).toLocaleDateString()}
+                                    </span>
+                                  </div>
                                 </div>
                               </div>
                               
-                              <div className="flex items-center justify-between mt-3">
-                                <span className="text-xs text-slate-400 flex items-center gap-1">
-                                  <Clock className="w-3 h-3" />
-                                  {new Date(video.createdAt).toLocaleDateString()}
-                                </span>
-                                
-                                {video.status === 'completed' && (
-                                  <div className="flex gap-2">
+                              {video.status === 'completed' && (
+                                <div className="flex gap-2 mt-3 pt-3 border-t border-slate-700/50">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleViewVideo(video._id);
+                                    }}
+                                    className="flex-1 bg-blue-600/20 hover:bg-blue-600/30 border-blue-500/50 text-blue-300 text-xs h-8"
+                                  >
+                                    <Play className="w-3 h-3 mr-1" />
+                                    Play
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleEditVideo(video._id);
+                                    }}
+                                    className="flex-1 bg-purple-600/20 hover:bg-purple-600/30 border-purple-500/50 text-purple-300 text-xs h-8"
+                                  >
+                                    <Edit3 className="w-3 h-3 mr-1" />
+                                    Edit
+                                  </Button>
+                                  {video.subtitleS3Key && (
                                     <Button
                                       variant="outline"
                                       size="sm"
-                                      onClick={() => handleViewVideo(video._id)}
-                                      className="bg-blue-600/20 hover:bg-blue-600/30 border-blue-500/50 text-blue-300 text-xs px-2 py-1 h-auto"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDownload(video.subtitleS3Key!);
+                                      }}
+                                      className="bg-slate-700/50 hover:bg-slate-700 border-slate-600 text-slate-300 text-xs h-8 px-3"
+                                      title="Download subtitles"
                                     >
-                                      <Play className="w-3 h-3 mr-1" />
-                                      Play
+                                      <Download className="w-3 h-3" />
                                     </Button>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => handleEditVideo(video._id)}
-                                      className="bg-purple-600/20 hover:bg-purple-600/30 border-purple-500/50 text-purple-300 text-xs px-2 py-1 h-auto"
-                                    >
-                                      <Edit3 className="w-3 h-3 mr-1" />
-                                      Edit
-                                    </Button>
-                                    {video.subtitleS3Key && (
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => handleDownload(video.subtitleS3Key!)}
-                                        className="bg-slate-700/50 hover:bg-slate-700 border-slate-600 text-slate-300 text-xs px-2 py-1 h-auto"
-                                      >
-                                        <Download className="w-3 h-3" />
-                                      </Button>
-                                    )}
+                                  )}
+                                </div>
+                              )}
+                              
+                              {video.status === 'processing' && video.progress !== undefined && (
+                                <div className="mt-3 pt-3 border-t border-slate-700/50">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <span className="text-xs text-slate-400">Processing...</span>
+                                    <span className="text-xs text-purple-400 font-medium">{video.progress}%</span>
                                   </div>
-                                )}
-                              </div>
+                                  <div className="w-full h-1.5 bg-slate-700/50 rounded-full overflow-hidden">
+                                    <motion.div
+                                      initial={{ width: 0 }}
+                                      animate={{ width: `${video.progress}%` }}
+                                      className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-full"
+                                    />
+                                  </div>
+                                </div>
+                              )}
                             </motion.div>
                           ))}
                         </div>
                       )}
                     </CardContent>
                   </Card>
-                </div>
+                </motion.div>
               </div>
             </div>
           )}

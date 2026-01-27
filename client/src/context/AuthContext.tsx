@@ -26,13 +26,31 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const router = useRouter();
 
   useEffect(() => {
-    const token = Cookies.get('token');
-    const storedUser = localStorage.getItem('user');
-    
-    if (token && storedUser) {
-      setUser(JSON.parse(storedUser));
-    }
-    setIsLoading(false);
+    const validateAuth = async () => {
+      const token = Cookies.get('token');
+      const storedUser = localStorage.getItem('user');
+      
+      if (token && storedUser) {
+        try {
+          // Optionally validate token with backend
+          // For now, just set user from localStorage
+          setUser(JSON.parse(storedUser));
+        } catch (error) {
+          // Invalid stored user data, clear it
+          Cookies.remove('token');
+          localStorage.removeItem('user');
+          setUser(null);
+        }
+      } else {
+        // Clear any invalid state
+        Cookies.remove('token');
+        localStorage.removeItem('user');
+        setUser(null);
+      }
+      setIsLoading(false);
+    };
+
+    validateAuth();
   }, []);
 
   const login = (token: string, userData: User) => {

@@ -11,8 +11,10 @@ services:
     volumes:
       - mongo_data:/data/db
     environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: password123
+      # WARNING: Change these credentials in production!
+      # Use environment variables or secrets management
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-password123}
 
   # Redis - Job Queue Broker
   redis:
@@ -23,7 +25,6 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-
   # Note: Worker runs locally, not in Docker
   # Start worker with: cd worker && npm run dev
 

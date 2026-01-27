@@ -5,8 +5,8 @@ export default async function videoRoutes(fastify: FastifyInstance) {
   fastify.addHook('onRequest', async (request, reply) => {
     try {
       await request.jwtVerify();
-    } catch (err) {
-      reply.send(err);
+    } catch (err: any) {
+      reply.code(401).send({ message: 'Unauthorized: Invalid or missing token' });
     }
   });
 
