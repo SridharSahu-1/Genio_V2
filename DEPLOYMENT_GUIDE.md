@@ -92,8 +92,8 @@ Railway gives **$5/month free credit** which is enough for a PoC worker.
 2. Sign up with GitHub
 3. Click **New Project** → **Deploy from GitHub repo**
 4. Select your repository
-5. Railway will auto-detect the `railway.json` config
-6. Set **Root Directory** to: `worker`
+5. **Important**: In Railway settings, set **Root Directory** to: `worker`
+6. Railway will auto-detect the `Dockerfile` in the `worker/` directory
 7. **Environment Variables** (Add these):
    ```
    NODE_ENV=production
