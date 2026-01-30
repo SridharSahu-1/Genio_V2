@@ -1,10 +1,18 @@
 import { Queue } from 'bullmq';
 import { getDownloadUrl, cleanS3Key } from './s3Service';
 
-const connection = {
+const connection: any = {
   host: process.env.REDIS_HOST || 'localhost',
   port: parseInt(process.env.REDIS_PORT || '6379'),
 };
+
+// Add username and password if provided (required for Redis Cloud)
+if (process.env.REDIS_USERNAME) {
+  connection.username = process.env.REDIS_USERNAME;
+}
+if (process.env.REDIS_PASSWORD) {
+  connection.password = process.env.REDIS_PASSWORD;
+}
 
 export const videoQueue = new Queue('video-processing', { connection });
 
@@ -12,7 +20,7 @@ export const addVideoJob = async (videoUrlOrPath: string, videoKey: string, hfTo
   // Check if it's a local file path (starts with /) or S3 URL/key
   const isLocalFile = videoUrlOrPath.startsWith('/') || (!videoUrlOrPath.startsWith('http'));
   const cleanKey = isLocalFile ? videoKey : cleanS3Key(videoKey);
-  
+
   console.log('='.repeat(70));
   console.log('📤 ADDING JOB TO QUEUE');
   console.log('='.repeat(70));
@@ -26,23 +34,23 @@ export const addVideoJob = async (videoUrlOrPath: string, videoKey: string, hfTo
     console.log(`Region: ${process.env.AWS_REGION || 'us-east-1'}`);
   }
   console.log('='.repeat(70));
-  
-  const job = await videoQueue.add('process-video', { 
+
+  const job = await videoQueue.add('process-video', {
     videoKey: cleanKey,
     videoUrl: videoUrlOrPath, // Can be local file path or S3 URL
     isLocalFile: isLocalFile, // Flag to indicate local file
-    hfToken, 
-    videoId, 
-    docId 
-  }, { 
+    hfToken,
+    videoId,
+    docId
+  }, {
     jobId: videoId,
     removeOnComplete: false,
   });
-  
+
   console.log(`✅ Job added to queue - Job ID: ${job.id || 'unknown'}`);
   const displayUrl = videoUrlOrPath.length > 100 ? videoUrlOrPath.substring(0, 100) + '...' : videoUrlOrPath;
   console.log(`   Job data sent:`, JSON.stringify({ videoKey: cleanKey, videoUrl: displayUrl, isLocalFile, videoId, docId }, null, 2));
-  
+
   if (job.id) {
     try {
       const storedJob = await videoQueue.getJob(job.id);
@@ -59,7 +67,7 @@ export const addVideoJob = async (videoUrlOrPath: string, videoKey: string, hfTo
       console.warn(`   ⚠️  Could not verify stored job data: ${verifyError.message}`);
     }
   }
-  
+
   return job;
 };
 

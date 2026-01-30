@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -91,11 +91,9 @@ export default function Dashboard() {
     }
   }, [user, isLoading, router]);
 
+  // Set up socket connection when user is authenticated
   useEffect(() => {
-    // Only fetch videos if user is authenticated
     if (!user || isLoading) return;
-    
-    fetchVideos();
 
     const socket = io(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001');
 
@@ -140,7 +138,7 @@ export default function Dashboard() {
     return () => {
       socket.disconnect();
     };
-  }, []);
+  }, [user, isLoading]);
 
   // GSAP animations on mount
   useEffect(() => {
@@ -155,7 +153,7 @@ export default function Dashboard() {
     }
   }, []);
 
-  const fetchVideos = async () => {
+  const fetchVideos = useCallback(async () => {
     try {
       const res = await api.get('/api/videos');
       setVideos(res.data);
@@ -170,8 +168,14 @@ export default function Dashboard() {
         toast.error('Failed to load videos');
       }
     }
-  };
+  }, [showOnboarding]);
 
+    // Fetch videos when user is loaded
+    useEffect(() => {
+      if (!user || isLoading) return;
+      fetchVideos();
+    }, [user, isLoading, fetchVideos]);
+    
   const onDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
       setFile(acceptedFiles[0]);
