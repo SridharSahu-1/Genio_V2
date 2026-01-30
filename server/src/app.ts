@@ -82,12 +82,17 @@ app.get('/health', async (request, reply) => {
     // Check Redis connection
     let redisStatus = 'unknown';
     try {
-      const redisClient = new Redis({
+      const redisConfig: any = {
         host: process.env.REDIS_HOST || 'localhost',
         port: parseInt(process.env.REDIS_PORT || '6379'),
         connectTimeout: 2000,
         lazyConnect: true,
-      });
+      };
+
+      if (process.env.REDIS_USERNAME) redisConfig.username = process.env.REDIS_USERNAME;
+      if (process.env.REDIS_PASSWORD) redisConfig.password = process.env.REDIS_PASSWORD;
+
+      const redisClient = new Redis(redisConfig);
       await redisClient.connect();
       await redisClient.ping();
       redisStatus = 'connected';

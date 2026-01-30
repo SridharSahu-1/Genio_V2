@@ -2,10 +2,17 @@ import { QueueEvents } from 'bullmq';
 import { getIO } from './socketService';
 import Video from '../models/Video';
 
-const connection = {
+const connection: any = {
   host: process.env.REDIS_HOST || 'localhost',
   port: parseInt(process.env.REDIS_PORT || '6379'),
 };
+
+if (process.env.REDIS_USERNAME) {
+  connection.username = process.env.REDIS_USERNAME;
+}
+if (process.env.REDIS_PASSWORD) {
+  connection.password = process.env.REDIS_PASSWORD;
+}
 
 export const setupQueueListeners = () => {
   const queueEvents = new QueueEvents('video-processing', { connection });

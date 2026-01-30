@@ -8,25 +8,29 @@ dotenv.config();
 // Check if we're running locally (not in Docker) by checking Redis host
 const redisHost = process.env.REDIS_HOST || 'localhost';
 
-// Allow local worker - user wants to run worker locally for debugging
-// Note: For production, use Docker worker to avoid macOS compatibility issues
-if (redisHost === 'localhost') {
+// Detect environment
+if (redisHost === 'localhost' || redisHost === '127.0.0.1') {
   console.log('✅ Running local worker (localhost Redis)');
-}
-
-// Also check if we're in Docker by checking environment
-// In Docker, HOSTNAME typically contains container name or is set
-if (process.env.REDIS_HOST === 'redis' || process.env.REDIS_HOST?.includes('redis')) {
-  console.log('✅ Running in Docker environment - worker enabled');
+} else {
+  // Running in cloud (Railway, Fly.io, Render, etc.) with Upstash or cloud Redis
+  console.log('✅ Running in cloud/Docker environment - worker enabled');
+  console.log(`   Redis Host: ${redisHost}`);
 }
 
 import { Worker } from 'bullmq';
 import { processVideo } from './processor';
 
-const connection = {
+const connection: any = {
   host: process.env.REDIS_HOST || 'localhost',
   port: parseInt(process.env.REDIS_PORT || '6379'),
 };
+
+if (process.env.REDIS_USERNAME) {
+  connection.username = process.env.REDIS_USERNAME;
+}
+if (process.env.REDIS_PASSWORD) {
+  connection.password = process.env.REDIS_PASSWORD;
+}
 
 console.log(`🔗 Worker connecting to Redis at ${connection.host}:${connection.port}`);
 console.log(`   Queue name: video-processing`);

@@ -1,6 +1,11 @@
 node_modules
-venv
-.env
 dist
-
-
+temp
+*.log
+.env
+.env.local
+.git
+.gitignore
+venv
+__pycache__
+*.pyc
