@@ -1,5 +1,5 @@
 # fly.toml for Genio Worker
-# Deploy with: cd worker && flyctl launch (or flyctl deploy)
+# Deploy with: flyctl launch (or flyctl deploy) from worker directory
 # This is a background worker, no HTTP service needed
 
 app = "genio-worker"

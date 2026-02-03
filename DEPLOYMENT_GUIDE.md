@@ -82,11 +82,66 @@ redis://default:YOUR_PASSWORD@accepted-wallaby-28584.upstash.io:6379
 
 ---
 
-## ⚙️ Step 3: Deploy Worker to Railway (Recommended)
+## ⚙️ Step 3: Deploy Worker (Recommended: Fly.io)
 
-Railway gives **$5/month free credit** which is enough for a PoC worker.
+**Important**: Railway's free tier has build timeout issues with large Docker images (PyTorch + WhisperX). **Fly.io is recommended** for the worker.
 
-### Option A: Railway (Best for PoC)
+### Option A: Fly.io (Recommended - Best for Free Tier)
+
+Fly.io handles large Docker images better and has more generous free tier limits.
+
+1. **Install Fly CLI**:
+   ```bash
+   curl -L https://fly.io/install.sh | sh
+   ```
+
+2. **Login to Fly.io**:
+   ```bash
+   flyctl auth login
+   ```
+
+3. **Navigate to worker directory and deploy**:
+   ```bash
+   cd worker
+   flyctl launch
+   ```
+   - When prompted:
+     - Use existing `fly.toml`? **Yes**
+     - App name: `genio-worker` (or your choice)
+     - Region: Choose closest (e.g., `iad` for US East)
+     - Don't deploy yet, just create the app
+
+4. **Set Environment Variables**:
+   ```bash
+   flyctl secrets set REDIS_HOST=accepted-wallaby-28584.upstash.io
+   flyctl secrets set REDIS_PORT=6379
+   flyctl secrets set REDIS_PASSWORD=YOUR_UPSTASH_PASSWORD
+   flyctl secrets set AWS_ACCESS_KEY_ID=your-aws-key
+   flyctl secrets set AWS_SECRET_ACCESS_KEY=your-aws-secret
+   flyctl secrets set AWS_S3_BUCKET=your-bucket-name
+   flyctl secrets set AWS_REGION=us-east-1
+   flyctl secrets set NODE_ENV=production
+   ```
+
+5. **Deploy**:
+   ```bash
+   flyctl deploy
+   ```
+
+6. **Monitor**:
+   ```bash
+   flyctl logs
+   ```
+
+Fly.io free tier includes:
+- ✅ 3 shared-cpu VMs
+- ✅ 3GB persistent volume
+- ✅ 160GB outbound data transfer
+- ✅ No build timeout issues
+
+### Option B: Railway (Alternative - May Have Build Timeout)
+
+**Note**: Railway free tier may timeout during Docker build due to large image size (~2-3GB). If you encounter build timeouts, use Fly.io (Option A) instead.
 
 1. Go to [Railway](https://railway.app/)
 2. Sign up with GitHub
@@ -107,31 +162,7 @@ Railway gives **$5/month free credit** which is enough for a PoC worker.
    HF_TOKEN=your-huggingface-token (if needed)
    ```
 
-8. Railway will automatically:
-   - Build the Docker image
-   - Deploy the worker
-   - Keep it running 24/7
-
-9. Monitor usage in Railway dashboard (stays within free $5/month for PoC)
-
-### Option B: Fly.io (Alternative Free Option)
-
-If Railway doesn't work, use Fly.io:
-
-1. Install Fly CLI: `curl -L https://fly.io/install.sh | sh`
-2. Login: `flyctl auth login`
-3. Deploy: `cd worker && flyctl launch`
-4. Follow prompts (use `fly.toml` config)
-5. Set environment variables:
-   ```bash
-   flyctl secrets set REDIS_HOST=accepted-wallaby-28584.upstash.io
-   flyctl secrets set REDIS_PORT=6379
-   flyctl secrets set REDIS_PASSWORD=YOUR_PASSWORD
-   flyctl secrets set AWS_ACCESS_KEY_ID=your-key
-   flyctl secrets set AWS_SECRET_ACCESS_KEY=your-secret
-   flyctl secrets set AWS_S3_BUCKET=your-bucket
-   flyctl secrets set AWS_REGION=us-east-1
-   ```
+8. If build times out, see `RAILWAY_FIX.md` for solutions
 
 ---
 

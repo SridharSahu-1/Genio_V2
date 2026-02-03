@@ -6,7 +6,7 @@
 |-----------|----------|------|
 | Client (Frontend) | Vercel | ✅ Free |
 | Server (API) | Render | ✅ Free |
-| Worker (AI Processing) | Railway | ✅ $5/month free credit |
+| Worker (AI Processing) | Fly.io | ✅ Free (3 shared VMs) |
 | Database | MongoDB Atlas | ✅ Free |
 | Queue | Upstash Redis | ✅ Free |
 
@@ -29,13 +29,24 @@ From your Redis URL: `redis://default:PASSWORD@HOST:6379`
 6. Add all env vars (see DEPLOYMENT_GUIDE.md)
 7. Copy URL: `https://genio-server.onrender.com`
 
-### 3. Deploy Worker (Railway)
-1. Go to [Railway](https://railway.app/)
-2. New Project → Deploy from GitHub
-3. Root Directory: `worker`
-4. Railway auto-detects Dockerfile
-5. Add env vars (same Redis/AWS as server)
-6. Deploy!
+### 3. Deploy Worker (Fly.io - Recommended)
+**Note**: Railway free tier has build timeout issues. Use Fly.io instead.
+
+1. Install Fly CLI: `curl -L https://fly.io/install.sh | sh`
+2. Login: `flyctl auth login`
+3. Deploy: `cd worker && flyctl launch`
+4. Use existing `fly.toml` when prompted
+5. Set secrets:
+   ```bash
+   flyctl secrets set REDIS_HOST=accepted-wallaby-28584.upstash.io
+   flyctl secrets set REDIS_PORT=6379
+   flyctl secrets set REDIS_PASSWORD=YOUR_PASSWORD
+   flyctl secrets set AWS_ACCESS_KEY_ID=...
+   flyctl secrets set AWS_SECRET_ACCESS_KEY=...
+   flyctl secrets set AWS_S3_BUCKET=...
+   flyctl secrets set AWS_REGION=us-east-1
+   ```
+6. Deploy: `flyctl deploy`
 
 ### 4. Update Frontend (Vercel)
 1. Vercel Dashboard → Settings → Environment Variables
@@ -61,7 +72,7 @@ AWS_S3_BUCKET=...
 AWS_REGION=us-east-1
 ```
 
-### Worker (Railway)
+### Worker (Fly.io)
 ```
 NODE_ENV=production
 REDIS_HOST=accepted-wallaby-28584.upstash.io

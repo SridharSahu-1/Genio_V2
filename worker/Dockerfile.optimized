@@ -1,15 +1,16 @@
-FROM nikolaik/python-nodejs:python3.10-nodejs20
+# Optimized Dockerfile for Railway - uses multi-stage build to reduce final image size
+FROM nikolaik/python-nodejs:python3.10-nodejs20 AS base
 
 WORKDIR /app
 
-# Install system dependencies in one layer
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     git \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Upgrade pip and install Python dependencies in one layer for better caching
+# Install Python dependencies
 RUN pip install --upgrade pip setuptools wheel && \
     pip install --no-cache-dir \
     torch==2.1.2 \
@@ -18,15 +19,22 @@ RUN pip install --upgrade pip setuptools wheel && \
     --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir git+https://github.com/m-bain/whisperx.git
 
-# Install Node dependencies first (better caching)
+# Install Node dependencies
 COPY package*.json ./
 RUN npm ci --only=production && npm cache clean --force
 
-# Copy source code
+# Copy source and build
 COPY . .
-
-# Build typescript
 RUN npm run build
 
-# Start worker
+# Final stage - minimal runtime image
+FROM base
+WORKDIR /app
+
+# Copy only necessary files
+COPY --from=base /app/dist ./dist
+COPY --from=base /app/node_modules ./node_modules
+COPY --from=base /app/package.json ./package.json
+
+# Python and system deps are already in base image
 CMD ["node", "dist/index.js"]
