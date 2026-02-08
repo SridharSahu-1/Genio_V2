@@ -19,14 +19,18 @@ RUN pip install --upgrade pip setuptools wheel && \
     pip install --no-cache-dir git+https://github.com/m-bain/whisperx.git
 
 # Install Node dependencies first (better caching)
+# Install ALL dependencies (including dev dependencies for building)
 COPY package*.json ./
-RUN npm ci --only=production && npm cache clean --force
+RUN npm install && npm cache clean --force
 
 # Copy source code
 COPY . .
 
 # Build typescript
 RUN npm run build
+
+# Remove dev dependencies after build to reduce image size
+RUN npm prune --production && npm cache clean --force
 
 # Start worker
 CMD ["node", "dist/index.js"]

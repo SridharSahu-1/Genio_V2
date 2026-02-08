@@ -30,5 +30,4 @@ README.md
 *.md
 .eslintrc*
 .prettierrc*
-tsconfig.json
 nodemon.json
