@@ -2,17 +2,54 @@ import { QueueEvents } from 'bullmq';
 import { getIO } from './socketService';
 import Video from '../models/Video';
 
-const connection: any = {
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT || '6379'),
+// Helper to parse Redis URL or use individual env vars
+const getRedisConnection = () => {
+  // If REDIS_URL is provided, parse it
+  if (process.env.REDIS_URL) {
+    try {
+      const url = new URL(process.env.REDIS_URL);
+      return {
+        host: url.hostname,
+        port: parseInt(url.port || '6379'),
+        username: url.username || undefined,
+        password: url.password || undefined,
+      };
+    } catch (e) {
+      console.warn('⚠️  Failed to parse REDIS_URL, using individual env vars');
+    }
+  }
+
+  // Otherwise, use individual env vars
+  let host = process.env.REDIS_HOST || 'localhost';
+  
+  // If REDIS_HOST contains a full URL (common mistake), extract hostname
+  if (host.startsWith('redis://') || host.startsWith('rediss://')) {
+    try {
+      const url = new URL(host);
+      host = url.hostname;
+      console.warn('⚠️  REDIS_HOST contains full URL, extracted hostname:', host);
+    } catch (e) {
+      console.warn('⚠️  REDIS_HOST looks like URL but failed to parse');
+    }
+  }
+
+  const connection: any = {
+    host: host,
+    port: parseInt(process.env.REDIS_PORT || '6379'),
+  };
+
+  // Add username and password if provided
+  if (process.env.REDIS_USERNAME) {
+    connection.username = process.env.REDIS_USERNAME;
+  }
+  if (process.env.REDIS_PASSWORD) {
+    connection.password = process.env.REDIS_PASSWORD;
+  }
+
+  return connection;
 };
 
-if (process.env.REDIS_USERNAME) {
-  connection.username = process.env.REDIS_USERNAME;
-}
-if (process.env.REDIS_PASSWORD) {
-  connection.password = process.env.REDIS_PASSWORD;
-}
+const connection = getRedisConnection();
 
 export const setupQueueListeners = () => {
   const queueEvents = new QueueEvents('video-processing', { connection });

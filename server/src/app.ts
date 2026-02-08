@@ -82,8 +82,21 @@ app.get('/health', async (request, reply) => {
     // Check Redis connection
     let redisStatus = 'unknown';
     try {
+      // Helper to parse Redis config
+      let redisHost = process.env.REDIS_HOST || 'localhost';
+      
+      // If REDIS_HOST contains a full URL, extract hostname
+      if (redisHost.startsWith('redis://') || redisHost.startsWith('rediss://')) {
+        try {
+          const url = new URL(redisHost);
+          redisHost = url.hostname;
+        } catch (e) {
+          // Ignore parse errors
+        }
+      }
+
       const redisConfig: any = {
-        host: process.env.REDIS_HOST || 'localhost',
+        host: redisHost,
         port: parseInt(process.env.REDIS_PORT || '6379'),
         connectTimeout: 2000,
         lazyConnect: true,
@@ -91,6 +104,11 @@ app.get('/health', async (request, reply) => {
 
       if (process.env.REDIS_USERNAME) redisConfig.username = process.env.REDIS_USERNAME;
       if (process.env.REDIS_PASSWORD) redisConfig.password = process.env.REDIS_PASSWORD;
+
+      // Enable TLS for Upstash (rediss://) or if REDIS_TLS is set
+      if (process.env.REDIS_URL?.startsWith('rediss://') || process.env.REDIS_TLS === 'true' || process.env.REDIS_TLS === '1') {
+        redisConfig.tls = {};
+      }
 
       const redisClient = new Redis(redisConfig);
       await redisClient.connect();
