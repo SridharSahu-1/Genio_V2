@@ -18,9 +18,13 @@ const app = Fastify({ logger: true });
 
 // Plugins
 // CORS configuration - allow specific origins in production
-const allowedOrigins = process.env.CORS_ORIGINS 
-  ? process.env.CORS_ORIGINS.split(',').map(origin => origin.trim())
+const corsOriginsEnv = process.env.CORS_ORIGINS || '';
+const allowedOrigins = corsOriginsEnv 
+  ? corsOriginsEnv.split(',').map(origin => origin.trim())
   : ['http://localhost:3000', 'http://localhost:3001'];
+
+// Check if wildcard is enabled
+const allowAllOrigins = allowedOrigins.includes('*') || allowedOrigins.length === 0;
 
 app.register(cors, { 
   origin: (origin, callback) => {
@@ -29,6 +33,11 @@ app.register(cors, {
     
     // In development, allow all origins
     if (process.env.NODE_ENV === 'development') {
+      return callback(null, true);
+    }
+    
+    // If wildcard is enabled, allow all origins
+    if (allowAllOrigins) {
       return callback(null, true);
     }
     

@@ -322,6 +322,23 @@ else
     echo "   Generated new JWT_SECRET"
 fi
 
+# Create/Update .env.production file (preserve existing AWS credentials if they're real)
+if [ -f .env.production ]; then
+    # Check if AWS credentials are already set and not placeholders
+    EXISTING_AWS_KEY=\$(grep "^AWS_ACCESS_KEY_ID=" .env.production | cut -d'=' -f2- || echo "")
+    EXISTING_AWS_SECRET=\$(grep "^AWS_SECRET_ACCESS_KEY=" .env.production | cut -d'=' -f2- || echo "")
+    
+    # If credentials exist and are not placeholders, preserve them
+    if [[ "\$EXISTING_AWS_KEY" != "" ]] && [[ "\$EXISTING_AWS_KEY" != *"YOUR_AWS"* ]] && [[ "\$EXISTING_AWS_KEY" != *"your"* ]]; then
+        echo "   ✅ Preserving existing AWS credentials"
+        USE_EXISTING_AWS=true
+    else
+        USE_EXISTING_AWS=false
+    fi
+else
+    USE_EXISTING_AWS=false
+fi
+
 # Create .env.production file
 {
     echo "NODE_ENV=production"
@@ -333,8 +350,13 @@ fi
     echo "REDIS_USERNAME=default"
     echo "REDIS_PASSWORD=AW-oAAIncDE4MmJlOWE0ZWFkOTQ0ZDQ0YmYxYjNkNDdkYzZkNzliMXAxMjg1ODQ"
     echo "REDIS_TLS=true"
-    echo "AWS_ACCESS_KEY_ID=YOUR_AWS_ACCESS_KEY_ID"
-    echo "AWS_SECRET_ACCESS_KEY=YOUR_AWS_SECRET_ACCESS_KEY"
+    if [ "\$USE_EXISTING_AWS" = "true" ]; then
+        echo "AWS_ACCESS_KEY_ID=\${EXISTING_AWS_KEY}"
+        echo "AWS_SECRET_ACCESS_KEY=\${EXISTING_AWS_SECRET}"
+    else
+        echo "AWS_ACCESS_KEY_ID=YOUR_AWS_ACCESS_KEY_ID"
+        echo "AWS_SECRET_ACCESS_KEY=YOUR_AWS_SECRET_ACCESS_KEY"
+    fi
     echo "AWS_S3_BUCKET=genio-videos"
     echo "AWS_REGION=us-east-1"
     echo "CORS_ORIGINS=*"

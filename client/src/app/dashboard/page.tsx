@@ -18,12 +18,12 @@ import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion'
 import { useDropzone } from 'react-dropzone';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { 
-  Upload, 
-  Link as LinkIcon, 
-  Play, 
-  Download, 
-  LogOut, 
+import {
+  Upload,
+  Link as LinkIcon,
+  Play,
+  Download,
+  LogOut,
   Video,
   Loader2,
   CheckCircle2,
@@ -80,6 +80,14 @@ export default function Dashboard() {
   const heroRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
+  // Check if onboarding was dismissed
+  useEffect(() => {
+    const onboardingDismissed = localStorage.getItem('onboardingDismissed');
+    if (onboardingDismissed === 'true') {
+      setShowOnboarding(false);
+    }
+  }, []);
+
   const { scrollYProgress } = useScroll();
   const opacity = useTransform(scrollYProgress, [0, 0.5], [1, 0]);
   const scale = useTransform(scrollYProgress, [0, 0.5], [1, 0.8]);
@@ -101,8 +109,8 @@ export default function Dashboard() {
       setVideos((prev) => prev.map(v => v._id === videoId ? { ...v, status: 'processing', progress } : v));
       if (message) {
         setLogs(prev => ({
-            ...prev,
-            [videoId]: [...(prev[videoId] || []), message]
+          ...prev,
+          [videoId]: [...(prev[videoId] || []), message]
         }));
       }
     });
@@ -111,17 +119,17 @@ export default function Dashboard() {
       console.log(`✅ Video ${videoId} completed, subtitleS3Key:`, subtitleS3Key);
       console.log(`   SubtitleS3Key type: ${typeof subtitleS3Key}`);
       console.log(`   SubtitleS3Key value: "${subtitleS3Key}"`);
-      
-      setVideos((prev) => prev.map(v => 
-        v._id === videoId 
-          ? { ...v, status: 'completed', progress: 100, subtitleS3Key: subtitleS3Key || v.subtitleS3Key } 
+
+      setVideos((prev) => prev.map(v =>
+        v._id === videoId
+          ? { ...v, status: 'completed', progress: 100, subtitleS3Key: subtitleS3Key || v.subtitleS3Key }
           : v
       ));
-      
+
       setTimeout(() => {
         fetchVideos();
       }, 500);
-      
+
       if (subtitleS3Key) {
         toast.success('Video processing completed! Subtitles are ready.');
       } else {
@@ -130,9 +138,9 @@ export default function Dashboard() {
     });
 
     socket.on('video-failed', ({ videoId, reason }) => {
-       console.error(`Video ${videoId} failed:`, reason);
-       setVideos((prev) => prev.map(v => v._id === videoId ? { ...v, status: 'failed', progress: 0 } : v));
-       toast.error(`Video processing failed: ${reason || 'Unknown error'}`);
+      console.error(`Video ${videoId} failed:`, reason);
+      setVideos((prev) => prev.map(v => v._id === videoId ? { ...v, status: 'failed', progress: 0 } : v));
+      toast.error(`Video processing failed: ${reason || 'Unknown error'}`);
     });
 
     return () => {
@@ -157,8 +165,9 @@ export default function Dashboard() {
     try {
       const res = await api.get('/api/videos');
       setVideos(res.data);
-      
-      if (res.data.length === 0 && !showOnboarding) {
+
+      const onboardingDismissed = localStorage.getItem('onboardingDismissed');
+      if (res.data.length === 0 && !showOnboarding && onboardingDismissed !== 'true') {
         setShowOnboarding(true);
       }
     } catch (err: any) {
@@ -170,12 +179,12 @@ export default function Dashboard() {
     }
   }, [showOnboarding]);
 
-    // Fetch videos when user is loaded
-    useEffect(() => {
-      if (!user || isLoading) return;
-      fetchVideos();
-    }, [user, isLoading, fetchVideos]);
-    
+  // Fetch videos when user is loaded
+  useEffect(() => {
+    if (!user || isLoading) return;
+    fetchVideos();
+  }, [user, isLoading, fetchVideos]);
+
   const onDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
       setFile(acceptedFiles[0]);
@@ -212,13 +221,13 @@ export default function Dashboard() {
 
     try {
       let uploadRes;
-      
+
       if (uploadMode === 'file') {
         console.log(`📤 Uploading file directly to server: ${file!.name}`);
-        
+
         const formData = new FormData();
         formData.append('file', file!);
-        
+
         uploadRes = await api.post('/api/videos/upload-direct', formData, {
           headers: {
             'Content-Type': undefined,
@@ -244,21 +253,21 @@ export default function Dashboard() {
             return prev + 10;
           });
         }, 200);
-        
+
         console.log(`📤 Uploading video from URL: ${videoUrl}`);
-        
+
         uploadRes = await api.post('/api/videos/upload-url', {
           url: videoUrl.trim(),
         });
-        
+
         clearInterval(progressInterval);
         setUploadProgress(100);
       }
-      
+
       const { videoId } = uploadRes.data;
       console.log('✅ File uploaded successfully to server');
       console.log(`   Video ID: ${videoId}`);
-      
+
       try {
         const verifyRes = await api.post('/api/videos/verify', { videoId });
         if (verifyRes.data.verified) {
@@ -267,7 +276,7 @@ export default function Dashboard() {
       } catch (verifyError: any) {
         console.warn('⚠️  Verification failed:', verifyError.message);
       }
-      
+
       try {
         await api.post('/api/videos/process', { videoId });
         toast.success('Video uploaded! AI is now generating subtitles...');
@@ -279,16 +288,16 @@ export default function Dashboard() {
       }
     } catch (uploadError: any) {
       console.error('❌ Upload error:', uploadError);
-      
+
       let errorMessage = 'Upload failed';
-      
+
       if (uploadError.response) {
         const status = uploadError.response.status;
         const statusText = uploadError.response.statusText;
         const data = uploadError.response.data;
-        
+
         errorMessage = `Upload failed: ${status} - ${statusText}`;
-        
+
         if (status === 403) {
           errorMessage = 'Upload forbidden. Please check your authentication.';
         } else if (status === 404) {
@@ -303,7 +312,7 @@ export default function Dashboard() {
       } else {
         errorMessage = `Upload failed: ${uploadError.message}`;
       }
-      
+
       toast.error(errorMessage);
     } finally {
       setUploading(false);
@@ -318,23 +327,23 @@ export default function Dashboard() {
   const handleDownload = async (subtitleS3Key: string) => {
     try {
       console.log(`📥 Downloading subtitle with S3 key: ${subtitleS3Key}`);
-      
+
       // Encode the S3 key to handle special characters
       const encodedKey = encodeURIComponent(subtitleS3Key);
       const res = await api.get(`/api/videos/download/${encodedKey}`);
-      
+
       if (res.data.url) {
         console.log(`✅ Got download URL, fetching file as blob`);
-        
+
         // Fetch the file as a blob to ensure download instead of opening in browser
         const response = await fetch(res.data.url);
         if (!response.ok) {
           throw new Error(`Failed to fetch subtitle: ${response.statusText}`);
         }
-        
+
         const blob = await response.blob();
         const filename = res.data.filename || subtitleS3Key.split('/').pop() || 'subtitle.ass';
-        
+
         // Create a blob URL and trigger download
         const blobUrl = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -343,12 +352,12 @@ export default function Dashboard() {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        
+
         // Clean up the blob URL after a short delay
         setTimeout(() => {
           window.URL.revokeObjectURL(blobUrl);
         }, 100);
-        
+
         toast.success('Subtitle downloaded successfully!');
       } else {
         throw new Error('No download URL received');
@@ -363,34 +372,34 @@ export default function Dashboard() {
   const handleViewVideo = async (videoId: string) => {
     try {
       console.log(`📥 Fetching playback URLs for video: ${videoId}`);
-      
+
       const video = videos.find(v => v._id === videoId);
       console.log(`   Video from state:`, video);
       console.log(`   Video subtitleS3Key:`, video?.subtitleS3Key);
-      
+
       const res = await api.get(`/api/videos/playback/${videoId}`);
       console.log('✅ Playback URLs received:', res.data);
       console.log('   Subtitle URL:', res.data.subtitleUrl);
       console.log('   Subtitle URL type:', typeof res.data.subtitleUrl);
       console.log('   Subtitle URL value:', res.data.subtitleUrl);
-      
+
       let subtitleUrl: string | null = null;
-      if (res.data.subtitleUrl && 
-          res.data.subtitleUrl !== 'null' && 
-          res.data.subtitleUrl !== null && 
-          res.data.subtitleUrl !== undefined) {
+      if (res.data.subtitleUrl &&
+        res.data.subtitleUrl !== 'null' &&
+        res.data.subtitleUrl !== null &&
+        res.data.subtitleUrl !== undefined) {
         subtitleUrl = res.data.subtitleUrl;
       }
-      
+
       console.log(`   Final subtitleUrl:`, subtitleUrl);
-      
+
       setPlayingVideo({
         videoUrl: res.data.videoUrl,
         subtitleUrl: subtitleUrl,
         docId: res.data.docId,
         title: res.data.title,
       });
-      
+
       if (!subtitleUrl) {
         if (video?.subtitleS3Key) {
           toast.warning('Subtitles exist but URL generation failed. Please try again.');
@@ -410,7 +419,7 @@ export default function Dashboard() {
     try {
       const res = await api.get(`/api/videos/playback/${videoId}`);
       const subtitleUrl = res.data.subtitleUrl === 'null' || res.data.subtitleUrl === null ? null : res.data.subtitleUrl;
-      
+
       setEditingVideo({
         videoUrl: res.data.videoUrl,
         subtitleUrl: subtitleUrl,
@@ -459,235 +468,243 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-black text-white relative overflow-hidden">
-        <ThreeBackground />
-        
-        <div ref={containerRef} className="relative z-10">
-          {playingVideo ? (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.3 }}
-              className="p-6 md:p-8 lg:p-12"
-            >
-              <VideoPlayer
-                videoUrl={playingVideo.videoUrl}
-                subtitleUrl={playingVideo.subtitleUrl}
-                title={playingVideo.title}
-                onClose={() => setPlayingVideo(null)}
-              />
-            </motion.div>
-          ) : editingVideo ? (
-            <VideoEditor
-              videoUrl={editingVideo.videoUrl}
-              onClose={() => setEditingVideo(null)}
+      <ThreeBackground />
+
+      <div ref={containerRef} className="relative z-10">
+        {playingVideo ? (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.3 }}
+            className="p-6 md:p-8 lg:p-12"
+          >
+            <VideoPlayer
+              videoUrl={playingVideo.videoUrl}
+              subtitleUrl={playingVideo.subtitleUrl}
+              title={playingVideo.title}
+              onClose={() => setPlayingVideo(null)}
             />
-          ) : (
-            <div className="p-6 md:p-8 lg:p-12 max-w-7xl mx-auto">
-              {/* Hero Section */}
-              <motion.div
-                ref={heroRef}
-                style={{ opacity, scale }}
-                className="mb-16 text-center"
+          </motion.div>
+        ) : editingVideo ? (
+          <VideoEditor
+            videoUrl={editingVideo.videoUrl}
+            onClose={() => setEditingVideo(null)}
+          />
+        ) : (
+          <div className="p-6 md:p-8 lg:p-12 max-w-7xl mx-auto">
+            {/* Hero Section */}
+            <motion.div
+              ref={heroRef}
+              style={{ opacity, scale }}
+              className="mb-16 text-center"
+            >
+              <motion.h1
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.8 }}
+                className="text-5xl md:text-7xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400"
               >
-                <motion.h1
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.8 }}
-                  className="text-5xl md:text-7xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400"
-                >
-                  Transform Videos with AI
-                </motion.h1>
-                <motion.p
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.8, delay: 0.2 }}
-                  className="text-xl text-slate-400 max-w-2xl mx-auto"
-                >
-                  Professional video editing, AI-powered subtitles, and seamless workflow
-                </motion.p>
-              </motion.div>
+                Transform Videos with AI
+              </motion.h1>
+              <motion.p
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.8, delay: 0.2 }}
+                className="text-xl text-slate-400 max-w-2xl mx-auto"
+              >
+                Professional video editing, AI-powered subtitles, and seamless workflow
+              </motion.p>
+            </motion.div>
 
-              {/* Onboarding */}
-              <AnimatePresence>
-                {showOnboarding && (
+            {/* Onboarding */}
+            <AnimatePresence>
+              {showOnboarding && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                  onClick={() => {
+                    setShowOnboarding(false);
+                    localStorage.setItem('onboardingDismissed', 'true');
+                  }}
+                >
                   <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-                    onClick={() => setShowOnboarding(false)}
+                    initial={{ scale: 0.9, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.9, opacity: 0 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="bg-slate-900 border border-slate-700 rounded-2xl p-8 max-w-2xl w-full shadow-2xl"
                   >
-                    <motion.div
-                      initial={{ scale: 0.9, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      exit={{ scale: 0.9, opacity: 0 }}
-                      onClick={(e) => e.stopPropagation()}
-                      className="bg-slate-900 border border-slate-700 rounded-2xl p-8 max-w-2xl w-full shadow-2xl"
-                    >
-                      <div className="flex justify-between items-start mb-6">
-                        <h2 className="text-2xl font-bold text-white">Welcome to Genio AI</h2>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setShowOnboarding(false)}
-                          className="text-slate-400 hover:text-white"
-                        >
-                          <X className="w-5 h-5" />
-                        </Button>
-                      </div>
-                      
-                      <div className="space-y-6">
-                        <div className="flex items-start gap-4">
-                          <div className="p-3 bg-blue-500/20 rounded-lg">
-                            <Upload className="w-6 h-6 text-blue-400" />
-                          </div>
-                          <div>
-                            <h3 className="font-semibold text-white mb-1">1. Upload Your Video</h3>
-                            <p className="text-slate-400 text-sm">Drag & drop or paste a URL to get started</p>
-                          </div>
-                        </div>
-                        
-                        <div className="flex items-start gap-4">
-                          <div className="p-3 bg-purple-500/20 rounded-lg">
-                            <Sparkles className="w-6 h-6 text-purple-400" />
-                          </div>
-                          <div>
-                            <h3 className="font-semibold text-white mb-1">2. AI Generates Subtitles</h3>
-                            <p className="text-slate-400 text-sm">Watch as AI automatically transcribes your video</p>
-                          </div>
-                        </div>
-                        
-                        <div className="flex items-start gap-4">
-                          <div className="p-3 bg-green-500/20 rounded-lg">
-                            <Play className="w-6 h-6 text-green-400" />
-                          </div>
-                          <div>
-                            <h3 className="font-semibold text-white mb-1">3. Edit & Export</h3>
-                            <p className="text-slate-400 text-sm">Crop, trim, add effects, and export your video</p>
-                          </div>
-                        </div>
-                      </div>
-                      
+                    <div className="flex justify-between items-start mb-6">
+                      <h2 className="text-2xl font-bold text-white">Welcome to Genio AI</h2>
                       <Button
-                        onClick={() => setShowOnboarding(false)}
-                        className="w-full mt-8 bg-blue-600 hover:bg-blue-700 text-white"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setShowOnboarding(false);
+                          localStorage.setItem('onboardingDismissed', 'true');
+                        }}
+                        className="text-slate-400 hover:text-white"
                       >
-                        Get Started
-                        <ArrowRight className="w-4 h-4 ml-2" />
+                        <X className="w-5 h-5" />
                       </Button>
-                    </motion.div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+                    </div>
 
-              {/* Modern Header */}
-              <div className="mb-8">
-                <div className="flex justify-between items-start mb-6">
-                  <div>
-                    <motion.h1
-                      initial={{ opacity: 0, y: -10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="text-3xl md:text-4xl font-bold mb-2 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400"
+                    <div className="space-y-6">
+                      <div className="flex items-start gap-4">
+                        <div className="p-3 bg-blue-500/20 rounded-lg">
+                          <Upload className="w-6 h-6 text-blue-400" />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-white mb-1">1. Upload Your Video</h3>
+                          <p className="text-slate-400 text-sm">Drag & drop or paste a URL to get started</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-4">
+                        <div className="p-3 bg-purple-500/20 rounded-lg">
+                          <Sparkles className="w-6 h-6 text-purple-400" />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-white mb-1">2. AI Generates Subtitles</h3>
+                          <p className="text-slate-400 text-sm">Watch as AI automatically transcribes your video</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-4">
+                        <div className="p-3 bg-green-500/20 rounded-lg">
+                          <Play className="w-6 h-6 text-green-400" />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-white mb-1">3. Edit & Export</h3>
+                          <p className="text-slate-400 text-sm">Crop, trim, add effects, and export your video</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <Button
+                      onClick={() => {
+                        setShowOnboarding(false);
+                        localStorage.setItem('onboardingDismissed', 'true');
+                      }}
+                      className="w-full mt-8 bg-blue-600 hover:bg-blue-700 text-white"
                     >
-                      Welcome back, {user?.username}
-                    </motion.h1>
-                    <p className="text-slate-400">Transform your videos with AI-powered subtitles</p>
-                  </div>
-                  <Button 
-                    onClick={logout} 
-                    variant="outline"
-                    className="bg-slate-900/50 hover:bg-slate-800/50 border-slate-700 text-slate-300 hover:text-white backdrop-blur-sm"
-                  >
-                    <LogOut className="w-4 h-4 mr-2" />
-                    Logout
-                  </Button>
-                </div>
+                      Get Started
+                      <ArrowRight className="w-4 h-4 ml-2" />
+                    </Button>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-                {/* Stats Cards */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
+            {/* Modern Header */}
+            <div className="mb-8">
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <motion.h1
+                    initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.1 }}
-                    className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/50 rounded-xl p-4 hover:border-blue-500/50 transition-all"
+                    className="text-3xl md:text-4xl font-bold mb-2 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400"
                   >
-                    <div className="flex items-center justify-between mb-2">
-                      <Video className="w-5 h-5 text-blue-400" />
-                      <span className="text-2xl font-bold text-white">{videos.length}</span>
-                    </div>
-                    <p className="text-xs text-slate-400">Total Videos</p>
-                  </motion.div>
-                  
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.2 }}
-                    className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/50 rounded-xl p-4 hover:border-green-500/50 transition-all"
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <CheckCircle2 className="w-5 h-5 text-green-400" />
-                      <span className="text-2xl font-bold text-white">{completedVideos.length}</span>
-                    </div>
-                    <p className="text-xs text-slate-400">Completed</p>
-                  </motion.div>
-                  
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.3 }}
-                    className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/50 rounded-xl p-4 hover:border-purple-500/50 transition-all"
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <Loader2 className="w-5 h-5 text-purple-400 animate-spin" />
-                      <span className="text-2xl font-bold text-white">{processingVideos.length}</span>
-                    </div>
-                    <p className="text-xs text-slate-400">Processing</p>
-                  </motion.div>
-                  
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.4 }}
-                    className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/50 rounded-xl p-4 hover:border-red-500/50 transition-all"
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <XCircle className="w-5 h-5 text-red-400" />
-                      <span className="text-2xl font-bold text-white">{failedVideos.length}</span>
-                    </div>
-                    <p className="text-xs text-slate-400">Failed</p>
-                  </motion.div>
+                    Welcome back, {user?.username}
+                  </motion.h1>
+                  <p className="text-slate-400">Transform your videos with AI-powered subtitles</p>
                 </div>
+                <Button
+                  onClick={logout}
+                  variant="outline"
+                  className="bg-slate-900/50 hover:bg-slate-800/50 border-slate-700 text-slate-300 hover:text-white backdrop-blur-sm"
+                >
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Logout
+                </Button>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-                {/* Upload Section */}
-                <div className="lg:col-span-2 space-y-6">
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.2 }}
-                  >
-                    <Card className="bg-slate-900/70 backdrop-blur-2xl border-slate-800/50 shadow-2xl hover:shadow-blue-500/10 transition-all">
-                      <CardHeader className="border-b border-slate-800/50 pb-4">
-                        <CardTitle className="text-xl font-semibold text-white flex items-center gap-3">
-                          <div className="p-2 bg-blue-500/20 rounded-lg">
-                            <Upload className="w-5 h-5 text-blue-400" />
-                          </div>
-                          Upload Video
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="pt-6 space-y-6">
+              {/* Stats Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1 }}
+                  className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/50 rounded-xl p-4 hover:border-blue-500/50 transition-all"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <Video className="w-5 h-5 text-blue-400" />
+                    <span className="text-2xl font-bold text-white">{videos.length}</span>
+                  </div>
+                  <p className="text-xs text-slate-400">Total Videos</p>
+                </motion.div>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/50 rounded-xl p-4 hover:border-green-500/50 transition-all"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <CheckCircle2 className="w-5 h-5 text-green-400" />
+                    <span className="text-2xl font-bold text-white">{completedVideos.length}</span>
+                  </div>
+                  <p className="text-xs text-slate-400">Completed</p>
+                </motion.div>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 }}
+                  className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/50 rounded-xl p-4 hover:border-purple-500/50 transition-all"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <Loader2 className="w-5 h-5 text-purple-400 animate-spin" />
+                    <span className="text-2xl font-bold text-white">{processingVideos.length}</span>
+                  </div>
+                  <p className="text-xs text-slate-400">Processing</p>
+                </motion.div>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.4 }}
+                  className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/50 rounded-xl p-4 hover:border-red-500/50 transition-all"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <XCircle className="w-5 h-5 text-red-400" />
+                    <span className="text-2xl font-bold text-white">{failedVideos.length}</span>
+                  </div>
+                  <p className="text-xs text-slate-400">Failed</p>
+                </motion.div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+              {/* Upload Section */}
+              <div className="lg:col-span-2 space-y-6">
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 }}
+                >
+                  <Card className="bg-slate-900/70 backdrop-blur-2xl border-slate-800/50 shadow-2xl hover:shadow-blue-500/10 transition-all">
+                    <CardHeader className="border-b border-slate-800/50 pb-4">
+                      <CardTitle className="text-xl font-semibold text-white flex items-center gap-3">
+                        <div className="p-2 bg-blue-500/20 rounded-lg">
+                          <Upload className="w-5 h-5 text-blue-400" />
+                        </div>
+                        Upload Video
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-6 space-y-6">
                       <div className="flex gap-3 p-1 bg-slate-800/50 rounded-lg">
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => setUploadMode('file')}
-                          className={`flex-1 transition-all ${
-                            uploadMode === 'file'
+                          className={`flex-1 transition-all ${uploadMode === 'file'
                               ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/50'
                               : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
-                          }`}
+                            }`}
                         >
                           <FileVideo className="w-4 h-4 mr-2" />
                           File Upload
@@ -696,26 +713,24 @@ export default function Dashboard() {
                           variant="ghost"
                           size="sm"
                           onClick={() => setUploadMode('url')}
-                          className={`flex-1 transition-all ${
-                            uploadMode === 'url'
+                          className={`flex-1 transition-all ${uploadMode === 'url'
                               ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/50'
                               : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
-                          }`}
+                            }`}
                         >
                           <LinkIcon className="w-4 h-4 mr-2" />
                           From URL
                         </Button>
                       </div>
-                      
+
                       {uploadMode === 'file' ? (
                         <div className="space-y-4">
                           <div
                             {...getRootProps()}
-                            className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-all relative overflow-hidden group ${
-                              isDragActive
+                            className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-all relative overflow-hidden group ${isDragActive
                                 ? 'border-blue-500 bg-blue-500/20 scale-105'
                                 : 'border-slate-700 hover:border-blue-500/50 bg-slate-800/30 hover:bg-slate-800/50'
-                            }`}
+                              }`}
                           >
                             <input {...getInputProps()} />
                             <div className="relative z-10">
@@ -798,9 +813,9 @@ export default function Dashboard() {
                           </div>
                         </motion.div>
                       )}
-                      
-                      <Button 
-                        onClick={handleUpload} 
+
+                      <Button
+                        onClick={handleUpload}
                         disabled={uploading || (uploadMode === 'file' && !file) || (uploadMode === 'url' && !videoUrl.trim())}
                         className="w-full h-12 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-medium shadow-lg shadow-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                       >
@@ -819,158 +834,158 @@ export default function Dashboard() {
                       </Button>
                     </CardContent>
                   </Card>
-                  </motion.div>
+                </motion.div>
 
-                  {/* Processing Videos */}
-                  {processingVideos.length > 0 && (
-                    <Card className="bg-slate-900/80 backdrop-blur-xl border-slate-700/50 shadow-2xl">
-                      <CardHeader className="border-b border-slate-700/50">
-                        <CardTitle className="text-xl font-semibold text-white flex items-center gap-2">
-                          <Sparkles className="w-5 h-5 text-purple-400 animate-pulse" />
-                          Generating Subtitles
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="pt-6">
-                        {processingVideos.map((video) => (
-                          <div key={video._id} className="mb-6 last:mb-0">
-                            <div className="flex items-center justify-between mb-3">
-                              <span className="text-sm font-medium text-slate-300">{video.title}</span>
-                              <span className="text-sm text-slate-400">{video.progress || 0}%</span>
-                            </div>
-                            <SubtitleGenerationAnimation 
-                              progress={video.progress || 0} 
-                              status={video.status}
-                            />
-                          </div>
-                        ))}
-                      </CardContent>
-                    </Card>
-                  )}
-                </div>
-
-                {/* Video Library */}
-                <motion.div
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.3 }}
-                >
-                  <Card className="bg-slate-900/70 backdrop-blur-2xl border-slate-800/50 shadow-2xl h-full flex flex-col">
-                    <CardHeader className="border-b border-slate-800/50 pb-4">
-                      <CardTitle className="text-xl font-semibold text-white flex items-center gap-3">
-                        <div className="p-2 bg-purple-500/20 rounded-lg">
-                          <Video className="w-5 h-5 text-purple-400" />
-                        </div>
-                        Video Library
-                        <span className="ml-auto text-sm font-normal text-slate-400 bg-slate-800/50 px-3 py-1 rounded-full">
-                          {videos.length}
-                        </span>
+                {/* Processing Videos */}
+                {processingVideos.length > 0 && (
+                  <Card className="bg-slate-900/80 backdrop-blur-xl border-slate-700/50 shadow-2xl">
+                    <CardHeader className="border-b border-slate-700/50">
+                      <CardTitle className="text-xl font-semibold text-white flex items-center gap-2">
+                        <Sparkles className="w-5 h-5 text-purple-400 animate-pulse" />
+                        Generating Subtitles
                       </CardTitle>
                     </CardHeader>
-                    <CardContent className="pt-6 flex-1 overflow-hidden flex flex-col">
-                      {videos.length === 0 ? (
-                        <div className="text-center py-12 text-slate-400 flex-1 flex flex-col items-center justify-center">
-                          <div className="w-20 h-20 bg-slate-800/50 rounded-2xl flex items-center justify-center mb-4">
-                            <Video className="w-10 h-10 opacity-30" />
+                    <CardContent className="pt-6">
+                      {processingVideos.map((video) => (
+                        <div key={video._id} className="mb-6 last:mb-0">
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-sm font-medium text-slate-300">{video.title}</span>
+                            <span className="text-sm text-slate-400">{video.progress || 0}%</span>
                           </div>
-                          <p className="font-medium mb-1">No videos yet</p>
-                          <p className="text-sm">Upload your first video to get started!</p>
+                          <SubtitleGenerationAnimation
+                            progress={video.progress || 0}
+                            status={video.status}
+                          />
                         </div>
-                      ) : (
-                        <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
-                          {videos.map((video, index) => (
-                            <motion.div
-                              key={video._id}
-                              initial={{ opacity: 0, y: 10 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              transition={{ delay: index * 0.05 }}
-                              whileHover={{ scale: 1.02, x: 4 }}
-                              className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-4 hover:border-blue-500/50 hover:bg-slate-800/70 transition-all group cursor-pointer"
-                              onClick={() => video.status === 'completed' && handleViewVideo(video._id)}
-                            >
-                              <div className="flex items-start justify-between gap-3 mb-3">
-                                <div className="flex items-center gap-3 flex-1 min-w-0">
-                                  <div className="flex-shrink-0">
-                                    {getStatusIcon(video.status)}
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                    <h3 className="font-medium text-white truncate text-sm mb-1">{video.title}</h3>
-                                    <span className="text-xs text-slate-500 flex items-center gap-1">
-                                      <Clock className="w-3 h-3" />
-                                      {new Date(video.createdAt).toLocaleDateString()}
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                              
-                              {video.status === 'completed' && (
-                                <div className="flex gap-2 mt-3 pt-3 border-t border-slate-700/50">
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleViewVideo(video._id);
-                                    }}
-                                    className="flex-1 bg-blue-600/20 hover:bg-blue-600/30 border-blue-500/50 text-blue-300 text-xs h-8"
-                                  >
-                                    <Play className="w-3 h-3 mr-1" />
-                                    Play
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleEditVideo(video._id);
-                                    }}
-                                    className="flex-1 bg-purple-600/20 hover:bg-purple-600/30 border-purple-500/50 text-purple-300 text-xs h-8"
-                                  >
-                                    <Edit3 className="w-3 h-3 mr-1" />
-                                    Edit
-                                  </Button>
-                                  {video.subtitleS3Key && (
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDownload(video.subtitleS3Key!);
-                                      }}
-                                      className="bg-slate-700/50 hover:bg-slate-700 border-slate-600 text-slate-300 text-xs h-8 px-3"
-                                      title="Download subtitles"
-                                    >
-                                      <Download className="w-3 h-3" />
-                                    </Button>
-                                  )}
-                                </div>
-                              )}
-                              
-                              {video.status === 'processing' && video.progress !== undefined && (
-                                <div className="mt-3 pt-3 border-t border-slate-700/50">
-                                  <div className="flex items-center justify-between mb-2">
-                                    <span className="text-xs text-slate-400">Processing...</span>
-                                    <span className="text-xs text-purple-400 font-medium">{video.progress}%</span>
-                                  </div>
-                                  <div className="w-full h-1.5 bg-slate-700/50 rounded-full overflow-hidden">
-                                    <motion.div
-                                      initial={{ width: 0 }}
-                                      animate={{ width: `${video.progress}%` }}
-                                      className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-full"
-                                    />
-                                  </div>
-                                </div>
-                              )}
-                            </motion.div>
-                          ))}
-                        </div>
-                      )}
+                      ))}
                     </CardContent>
                   </Card>
-                </motion.div>
+                )}
               </div>
+
+              {/* Video Library */}
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.3 }}
+              >
+                <Card className="bg-slate-900/70 backdrop-blur-2xl border-slate-800/50 shadow-2xl h-full flex flex-col">
+                  <CardHeader className="border-b border-slate-800/50 pb-4">
+                    <CardTitle className="text-xl font-semibold text-white flex items-center gap-3">
+                      <div className="p-2 bg-purple-500/20 rounded-lg">
+                        <Video className="w-5 h-5 text-purple-400" />
+                      </div>
+                      Video Library
+                      <span className="ml-auto text-sm font-normal text-slate-400 bg-slate-800/50 px-3 py-1 rounded-full">
+                        {videos.length}
+                      </span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-6 flex-1 overflow-hidden flex flex-col">
+                    {videos.length === 0 ? (
+                      <div className="text-center py-12 text-slate-400 flex-1 flex flex-col items-center justify-center">
+                        <div className="w-20 h-20 bg-slate-800/50 rounded-2xl flex items-center justify-center mb-4">
+                          <Video className="w-10 h-10 opacity-30" />
+                        </div>
+                        <p className="font-medium mb-1">No videos yet</p>
+                        <p className="text-sm">Upload your first video to get started!</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+                        {videos.map((video, index) => (
+                          <motion.div
+                            key={video._id}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: index * 0.05 }}
+                            whileHover={{ scale: 1.02, x: 4 }}
+                            className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-4 hover:border-blue-500/50 hover:bg-slate-800/70 transition-all group cursor-pointer"
+                            onClick={() => video.status === 'completed' && handleViewVideo(video._id)}
+                          >
+                            <div className="flex items-start justify-between gap-3 mb-3">
+                              <div className="flex items-center gap-3 flex-1 min-w-0">
+                                <div className="flex-shrink-0">
+                                  {getStatusIcon(video.status)}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <h3 className="font-medium text-white truncate text-sm mb-1">{video.title}</h3>
+                                  <span className="text-xs text-slate-500 flex items-center gap-1">
+                                    <Clock className="w-3 h-3" />
+                                    {new Date(video.createdAt).toLocaleDateString()}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {video.status === 'completed' && (
+                              <div className="flex gap-2 mt-3 pt-3 border-t border-slate-700/50">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleViewVideo(video._id);
+                                  }}
+                                  className="flex-1 bg-blue-600/20 hover:bg-blue-600/30 border-blue-500/50 text-blue-300 text-xs h-8"
+                                >
+                                  <Play className="w-3 h-3 mr-1" />
+                                  Play
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleEditVideo(video._id);
+                                  }}
+                                  className="flex-1 bg-purple-600/20 hover:bg-purple-600/30 border-purple-500/50 text-purple-300 text-xs h-8"
+                                >
+                                  <Edit3 className="w-3 h-3 mr-1" />
+                                  Edit
+                                </Button>
+                                {video.subtitleS3Key && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDownload(video.subtitleS3Key!);
+                                    }}
+                                    className="bg-slate-700/50 hover:bg-slate-700 border-slate-600 text-slate-300 text-xs h-8 px-3"
+                                    title="Download subtitles"
+                                  >
+                                    <Download className="w-3 h-3" />
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+
+                            {video.status === 'processing' && video.progress !== undefined && (
+                              <div className="mt-3 pt-3 border-t border-slate-700/50">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-xs text-slate-400">Processing...</span>
+                                  <span className="text-xs text-purple-400 font-medium">{video.progress}%</span>
+                                </div>
+                                <div className="w-full h-1.5 bg-slate-700/50 rounded-full overflow-hidden">
+                                  <motion.div
+                                    initial={{ width: 0 }}
+                                    animate={{ width: `${video.progress}%` }}
+                                    className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-full"
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </motion.div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </motion.div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

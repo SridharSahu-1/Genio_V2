@@ -34,6 +34,8 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
   const [subtitleText, setSubtitleText] = useState<string>('');
   const [subtitleData, setSubtitleData] = useState<any[]>([]);
   const [subtitleLoaded, setSubtitleLoaded] = useState(false);
+  const [wordTimings, setWordTimings] = useState<Array<{word: string, start: number, end: number}>>([]);
+  const [currentWordIndex, setCurrentWordIndex] = useState<number>(-1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [volume, setVolume] = useState(1);
@@ -75,7 +77,7 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
           throw new Error('Subtitle file is empty');
         }
         
-        // Simple ASS parser - extract dialogue lines
+        // Enhanced ASS parser - extract dialogue lines with word-level timing
         const lines = text.split('\n');
         const dialogues: any[] = [];
         let inEvents = false;
@@ -95,16 +97,98 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
               const startSeconds = parseAssTime(start);
               const endSeconds = parseAssTime(end);
               
-              const cleanText = text
-                .replace(/\\N/g, '\n')
-                .replace(/\{[^}]*\}/g, '')
-                .trim();
-
-              dialogues.push({
-                start: startSeconds,
-                end: endSeconds,
-                text: cleanText,
-              });
+              // Parse word-level timing from ASS format
+              // Format: [Speaker]: {\k{gap}}{\k{duration}}word {\k{duration}}word ...
+              // Remove speaker prefix like [Speaker]: 
+              let cleanText = text.replace(/^\[[^\]]+\]:\s*/, '').replace(/\\N/g, ' ');
+              
+              // Parse the timing tags and words sequentially
+              // Format: [Speaker]: {\k{gap}}}{\k{duration}}word {\k{duration}}word ...
+              const wordsWithTiming: Array<{word: string, start: number, end: number}> = [];
+              let currentTime = startSeconds;
+              
+              // Find all {\k{value}} tags with their positions
+              const kTagMatches: Array<{index: number, centiseconds: number, endIndex: number}> = [];
+              const kTagRegex = /\{k(\d+)\}/g;
+              let match;
+              
+              while ((match = kTagRegex.exec(cleanText)) !== null) {
+                kTagMatches.push({
+                  index: match.index,
+                  centiseconds: parseInt(match[1], 10),
+                  endIndex: match.index + match[0].length
+                });
+              }
+              
+              // Process each tag sequentially
+              for (let i = 0; i < kTagMatches.length; i++) {
+                const tag = kTagMatches[i];
+                const nextTag = i + 1 < kTagMatches.length ? kTagMatches[i + 1] : null;
+                const seconds = tag.centiseconds / 100;
+                
+                // Get text after this tag until the next tag or end of string
+                const textStart = tag.endIndex;
+                const textEnd = nextTag ? nextTag.index : cleanText.length;
+                const textAfter = cleanText.substring(textStart, textEnd).trim();
+                
+                // Remove any remaining tags from the text
+                const cleanWord = textAfter.replace(/\{[^}]*\}/g, '').trim();
+                
+                if (cleanWord) {
+                  // This is a word with the specified duration
+                  const words = cleanWord.split(/\s+/).filter(w => w.length > 0);
+                  if (words.length === 1) {
+                    wordsWithTiming.push({
+                      word: words[0],
+                      start: currentTime,
+                      end: currentTime + seconds
+                    });
+                    currentTime += seconds;
+                  } else if (words.length > 1) {
+                    // Multiple words, divide duration equally
+                    const wordDuration = seconds / words.length;
+                    words.forEach((word, idx) => {
+                      wordsWithTiming.push({
+                        word: word,
+                        start: currentTime + idx * wordDuration,
+                        end: currentTime + (idx + 1) * wordDuration
+                      });
+                    });
+                    currentTime += seconds;
+                  }
+                } else {
+                  // No text, this is a gap
+                  currentTime += seconds;
+                }
+              }
+              
+              // Fallback: if no word timings parsed, use simple text split
+              const textWithoutTags = cleanText.replace(/\{[^}]*\}/g, '').trim();
+              const wordsArray = textWithoutTags.split(/\s+/).filter(w => w.length > 0);
+              
+              if (wordsWithTiming.length > 0) {
+                dialogues.push({
+                  start: startSeconds,
+                  end: endSeconds,
+                  text: textWithoutTags,
+                  words: wordsWithTiming
+                });
+              } else {
+                // Fallback: distribute time evenly across words
+                dialogues.push({
+                  start: startSeconds,
+                  end: endSeconds,
+                  text: textWithoutTags,
+                  words: wordsArray.map((word, idx) => {
+                    const segmentDuration = (endSeconds - startSeconds) / wordsArray.length;
+                    return {
+                      word: word,
+                      start: startSeconds + idx * segmentDuration,
+                      end: startSeconds + (idx + 1) * segmentDuration
+                    };
+                  })
+                });
+              }
             }
           }
         }
@@ -151,11 +235,13 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
     };
   }, []);
 
-  // Update subtitle display based on video time
+  // Update subtitle display based on video time with word-level highlighting
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !subtitlesEnabled || subtitleData.length === 0) {
       setSubtitleText('');
+      setWordTimings([]);
+      setCurrentWordIndex(-1);
       return;
     }
 
@@ -164,11 +250,33 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
       const activeSubtitle = subtitleData.find(
         (sub) => currentTime >= sub.start && currentTime <= sub.end
       );
-      setSubtitleText(activeSubtitle ? activeSubtitle.text : '');
+      
+      if (activeSubtitle) {
+        setSubtitleText(activeSubtitle.text);
+        
+        // Update word timings and find current word
+        if (activeSubtitle.words && activeSubtitle.words.length > 0) {
+          setWordTimings(activeSubtitle.words);
+          
+          // Find the word that should be highlighted
+          const wordIndex = activeSubtitle.words.findIndex(
+            (word: {word: string, start: number, end: number}) => 
+              currentTime >= word.start && currentTime <= word.end
+          );
+          setCurrentWordIndex(wordIndex >= 0 ? wordIndex : -1);
+        } else {
+          setWordTimings([]);
+          setCurrentWordIndex(-1);
+        }
+      } else {
+        setSubtitleText('');
+        setWordTimings([]);
+        setCurrentWordIndex(-1);
+      }
     };
 
     updateSubtitle();
-    const interval = setInterval(updateSubtitle, 100);
+    const interval = setInterval(updateSubtitle, 50); // Update more frequently for smooth highlighting
     return () => clearInterval(interval);
   }, [subtitlesEnabled, subtitleData]);
 
@@ -440,7 +548,21 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
                   className="absolute bottom-20 left-1/2 transform -translate-x-1/2 px-6 py-3 bg-black/85 backdrop-blur-sm text-white text-center rounded-lg max-w-4xl border border-white/20 shadow-2xl"
                   style={{ pointerEvents: 'none', zIndex: 10 }}
                 >
-                  <p className="text-lg font-medium whitespace-pre-line leading-relaxed">{subtitleText}</p>
+                  {wordTimings.length > 0 ? (
+                    <p className="text-lg font-medium whitespace-pre-line leading-relaxed">
+                      {wordTimings.map((wordTiming, index) => (
+                        <span
+                          key={index}
+                          className={index === currentWordIndex ? 'text-yellow-400 font-bold' : ''}
+                        >
+                          {wordTiming.word}
+                          {index < wordTimings.length - 1 ? ' ' : ''}
+                        </span>
+                      ))}
+                    </p>
+                  ) : (
+                    <p className="text-lg font-medium whitespace-pre-line leading-relaxed">{subtitleText}</p>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>
