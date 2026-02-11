@@ -4,12 +4,12 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Play, 
-  Pause, 
-  Volume2, 
-  VolumeX, 
-  Maximize, 
+import {
+  Play,
+  Pause,
+  Volume2,
+  VolumeX,
+  Maximize,
   Minimize,
   Settings,
   X,
@@ -34,7 +34,7 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
   const [subtitleText, setSubtitleText] = useState<string>('');
   const [subtitleData, setSubtitleData] = useState<any[]>([]);
   const [subtitleLoaded, setSubtitleLoaded] = useState(false);
-  const [wordTimings, setWordTimings] = useState<Array<{word: string, start: number, end: number}>>([]);
+  const [wordTimings, setWordTimings] = useState<Array<{ word: string, start: number, end: number }>>([]);
   const [currentWordIndex, setCurrentWordIndex] = useState<number>(-1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -65,18 +65,18 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
         console.log('📥 Loading subtitles from:', subtitleUrl);
         setSubtitleLoaded(false);
         const response = await fetch(subtitleUrl);
-        
+
         if (!response.ok) {
           throw new Error(`Failed to fetch subtitles: ${response.status} ${response.statusText}`);
         }
-        
+
         const text = await response.text();
         console.log('✅ Subtitle file loaded, length:', text.length);
-        
+
         if (!text || text.length === 0) {
           throw new Error('Subtitle file is empty');
         }
-        
+
         // Enhanced ASS parser - extract dialogue lines with word-level timing
         const lines = text.split('\n');
         const dialogues: any[] = [];
@@ -93,25 +93,25 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
               const start = parts[1].trim();
               const end = parts[2].trim();
               const text = parts.slice(9).join(',');
-              
+
               const startSeconds = parseAssTime(start);
               const endSeconds = parseAssTime(end);
-              
+
               // Parse word-level timing from ASS format
               // Format: [Speaker]: {\k{gap}}{\k{duration}}word {\k{duration}}word ...
               // Remove speaker prefix like [Speaker]: 
               let cleanText = text.replace(/^\[[^\]]+\]:\s*/, '').replace(/\\N/g, ' ');
-              
+
               // Parse the timing tags and words sequentially
               // Format: [Speaker]: {\k{gap}}}{\k{duration}}word {\k{duration}}word ...
-              const wordsWithTiming: Array<{word: string, start: number, end: number}> = [];
+              const wordsWithTiming: Array<{ word: string, start: number, end: number }> = [];
               let currentTime = startSeconds;
-              
+
               // Find all {\k{value}} tags with their positions
-              const kTagMatches: Array<{index: number, centiseconds: number, endIndex: number}> = [];
+              const kTagMatches: Array<{ index: number, centiseconds: number, endIndex: number }> = [];
               const kTagRegex = /\{k(\d+)\}/g;
               let match;
-              
+
               while ((match = kTagRegex.exec(cleanText)) !== null) {
                 kTagMatches.push({
                   index: match.index,
@@ -119,21 +119,21 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
                   endIndex: match.index + match[0].length
                 });
               }
-              
+
               // Process each tag sequentially
               for (let i = 0; i < kTagMatches.length; i++) {
                 const tag = kTagMatches[i];
                 const nextTag = i + 1 < kTagMatches.length ? kTagMatches[i + 1] : null;
                 const seconds = tag.centiseconds / 100;
-                
+
                 // Get text after this tag until the next tag or end of string
                 const textStart = tag.endIndex;
                 const textEnd = nextTag ? nextTag.index : cleanText.length;
                 const textAfter = cleanText.substring(textStart, textEnd).trim();
-                
+
                 // Remove any remaining tags from the text
                 const cleanWord = textAfter.replace(/\{[^}]*\}/g, '').trim();
-                
+
                 if (cleanWord) {
                   // This is a word with the specified duration
                   const words = cleanWord.split(/\s+/).filter(w => w.length > 0);
@@ -161,11 +161,11 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
                   currentTime += seconds;
                 }
               }
-              
+
               // Fallback: if no word timings parsed, use simple text split
               const textWithoutTags = cleanText.replace(/\{[^}]*\}/g, '').trim();
               const wordsArray = textWithoutTags.split(/\s+/).filter(w => w.length > 0);
-              
+
               if (wordsWithTiming.length > 0) {
                 dialogues.push({
                   start: startSeconds,
@@ -250,17 +250,17 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
       const activeSubtitle = subtitleData.find(
         (sub) => currentTime >= sub.start && currentTime <= sub.end
       );
-      
+
       if (activeSubtitle) {
         setSubtitleText(activeSubtitle.text);
-        
+
         // Update word timings and find current word
         if (activeSubtitle.words && activeSubtitle.words.length > 0) {
           setWordTimings(activeSubtitle.words);
-          
+
           // Find the word that should be highlighted
           const wordIndex = activeSubtitle.words.findIndex(
-            (word: {word: string, start: number, end: number}) => 
+            (word: { word: string, start: number, end: number }) =>
               currentTime >= word.start && currentTime <= word.end
           );
           setCurrentWordIndex(wordIndex >= 0 ? wordIndex : -1);
@@ -389,18 +389,18 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
   const togglePlay = () => {
     const video = videoRef.current;
     if (!video) return;
-      if (video.paused) {
-        video.play();
-      } else {
-        video.pause();
-      }
+    if (video.paused) {
+      video.play();
+    } else {
+      video.pause();
+    }
   };
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     const video = videoRef.current;
     const progressBar = e.currentTarget;
     if (!video || !progressBar) return;
-    
+
     const rect = progressBar.getBoundingClientRect();
     const percent = (e.clientX - rect.left) / rect.width;
     video.currentTime = percent * duration;
@@ -454,69 +454,71 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
       className="relative w-full max-w-6xl mx-auto"
     >
       <Card className="overflow-hidden bg-slate-800/50 backdrop-blur-sm border border-slate-700 shadow-2xl">
-        <CardHeader className="bg-slate-900/50 border-b border-slate-700">
-        <div className="flex justify-between items-center">
-            <CardTitle className="text-white text-xl font-semibold">
+        <CardHeader className="bg-slate-900/50 border-b border-slate-700 p-3 sm:p-6">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <CardTitle className="text-white text-base sm:text-lg md:text-xl font-semibold break-words flex-1 min-w-0">
               {title}
             </CardTitle>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto justify-end">
               {/* Subtitle Status Indicator */}
               {hasSubtitles ? (
-                <motion.div 
+                <motion.div
                   initial={{ scale: 0.9 }}
                   animate={{ scale: 1 }}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/20 border border-emerald-500/50 rounded-lg"
+                  className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 bg-emerald-500/20 border border-emerald-500/50 rounded-lg"
                 >
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  <span className="text-sm font-medium text-emerald-300">Subtitles Available</span>
+                  <CheckCircle2 className="w-3 h-3 sm:w-4 sm:h-4 text-emerald-400 flex-shrink-0" />
+                  <span className="text-xs sm:text-sm font-medium text-emerald-300 hidden sm:inline">Subtitles Available</span>
+                  <span className="text-xs sm:text-sm font-medium text-emerald-300 sm:hidden">Available</span>
                 </motion.div>
               ) : (
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-700/50 border border-slate-600 rounded-lg">
-                  <AlertCircle className="w-4 h-4 text-slate-400" />
-                  <span className="text-sm text-slate-300">No Subtitles</span>
+                <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 bg-slate-700/50 border border-slate-600 rounded-lg">
+                  <AlertCircle className="w-3 h-3 sm:w-4 sm:h-4 text-slate-400 flex-shrink-0" />
+                  <span className="text-xs sm:text-sm text-slate-300 hidden sm:inline">No Subtitles</span>
+                  <span className="text-xs sm:text-sm text-slate-300 sm:hidden">None</span>
                 </div>
               )}
-              
+
               {hasSubtitles && (
                 <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-              <Button
-                variant={subtitlesEnabled ? 'default' : 'outline'}
-                size="sm"
+                  <Button
+                    variant={subtitlesEnabled ? 'default' : 'outline'}
+                    size="sm"
                     onClick={() => setSubtitlesEnabled(!subtitlesEnabled)}
-                    className={subtitlesEnabled 
-                      ? 'bg-blue-600 hover:bg-blue-700 text-white border-0' 
-                      : 'bg-slate-700/50 hover:bg-slate-700 border-slate-600 text-slate-300'
+                    className={subtitlesEnabled
+                      ? 'bg-blue-600 hover:bg-blue-700 text-white border-0 text-xs sm:text-sm'
+                      : 'bg-slate-700/50 hover:bg-slate-700 border-slate-600 text-slate-300 text-xs sm:text-sm'
                     }
                   >
-                    <Subtitles className="w-4 h-4 mr-2" />
-                    {subtitlesEnabled ? 'ON' : 'OFF'}
-              </Button>
+                    <Subtitles className="w-3 h-3 sm:w-4 sm:h-4 sm:mr-2" />
+                    <span className="hidden sm:inline">{subtitlesEnabled ? 'ON' : 'OFF'}</span>
+                  </Button>
                 </motion.div>
-            )}
-            {onClose && (
+              )}
+              {onClose && (
                 <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
-              <Button 
-                variant="ghost" 
-                size="sm" 
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={onClose}
-                    className="text-slate-400 hover:text-white hover:bg-slate-700/50"
-              >
+                    className="text-slate-400 hover:text-white hover:bg-slate-700/50 flex-shrink-0"
+                  >
                     <X className="w-4 h-4" />
-              </Button>
+                  </Button>
                 </motion.div>
-            )}
+              )}
+            </div>
           </div>
-        </div>
-      </CardHeader>
+        </CardHeader>
         <CardContent className="p-0">
-        <div 
+          <div
             className="relative w-full bg-black group"
-          style={{ paddingBottom: '56.25%' }}
+            style={{ paddingBottom: '56.25%' }}
             onMouseEnter={() => {
               setIsHovered(true);
               setShowControls(true);
             }}
-          onMouseLeave={() => setIsHovered(false)}
+            onMouseLeave={() => setIsHovered(false)}
             onMouseMove={() => {
               setShowControls(true);
               if (controlsTimeoutRef.current) {
@@ -528,15 +530,15 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
                 }, 3000);
               }
             }}
-        >
-          <video
-            ref={videoRef}
+          >
+            <video
+              ref={videoRef}
               className="absolute top-0 left-0 w-full h-full"
               onClick={togglePlay}
-          >
-            <source src={videoUrl} type="video/mp4" />
-            Your browser does not support the video tag.
-          </video>
+            >
+              <source src={videoUrl} type="video/mp4" />
+              Your browser does not support the video tag.
+            </video>
 
             {/* Subtitles Overlay */}
             <AnimatePresence>
@@ -545,11 +547,11 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 10 }}
-                  className="absolute bottom-20 left-1/2 transform -translate-x-1/2 px-6 py-3 bg-black/85 backdrop-blur-sm text-white text-center rounded-lg max-w-4xl border border-white/20 shadow-2xl"
+                  className="absolute bottom-16 sm:bottom-20 left-1/2 transform -translate-x-1/2 px-3 sm:px-4 md:px-6 py-2 sm:py-3 bg-black/85 backdrop-blur-sm text-white text-center rounded-lg max-w-[90%] sm:max-w-2xl md:max-w-4xl border border-white/20 shadow-2xl"
                   style={{ pointerEvents: 'none', zIndex: 10 }}
                 >
                   {wordTimings.length > 0 ? (
-                    <p className="text-lg font-medium whitespace-pre-line leading-relaxed">
+                    <p className="text-sm sm:text-base md:text-lg font-medium whitespace-pre-line leading-relaxed break-words">
                       {wordTimings.map((wordTiming, index) => (
                         <span
                           key={index}
@@ -561,7 +563,7 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
                       ))}
                     </p>
                   ) : (
-                    <p className="text-lg font-medium whitespace-pre-line leading-relaxed">{subtitleText}</p>
+                    <p className="text-sm sm:text-base md:text-lg font-medium whitespace-pre-line leading-relaxed break-words">{subtitleText}</p>
                   )}
                 </motion.div>
               )}
@@ -577,12 +579,12 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
                   className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent pointer-events-none"
                 >
                   {/* Top Controls */}
-                  <div className="absolute top-0 left-0 right-0 p-4 flex justify-end gap-2 pointer-events-auto">
+                  <div className="absolute top-0 left-0 right-0 p-2 sm:p-4 flex justify-end gap-2 pointer-events-auto">
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => setShowSettings(!showSettings)}
-                      className="text-white hover:bg-white/20 backdrop-blur-sm border-0"
+                      className="text-white hover:bg-white/20 backdrop-blur-sm border-0 h-8 w-8 sm:h-10 sm:w-auto sm:px-3"
                     >
                       <Settings className="w-4 h-4" />
                     </Button>
@@ -591,9 +593,9 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
                         initial={{ opacity: 0, y: -10, scale: 0.95 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                        className="absolute top-12 right-4 bg-slate-900 border border-slate-700 rounded-lg p-3 pointer-events-auto shadow-2xl"
+                        className="absolute top-10 sm:top-12 right-2 sm:right-4 bg-slate-900 border border-slate-700 rounded-lg p-2 sm:p-3 pointer-events-auto shadow-2xl z-50"
                       >
-                        <div className="text-white text-sm mb-2 font-semibold">Playback Speed</div>
+                        <div className="text-white text-xs sm:text-sm mb-2 font-semibold">Playback Speed</div>
                         <div className="grid grid-cols-4 gap-1">
                           {playbackRates.map((rate) => (
                             <motion.button
@@ -601,11 +603,10 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
                               whileHover={{ scale: 1.1 }}
                               whileTap={{ scale: 0.9 }}
                               onClick={() => changePlaybackRate(rate)}
-                              className={`px-2 py-1 rounded text-xs font-medium transition-all ${
-                                playbackRate === rate
+                              className={`px-1.5 sm:px-2 py-1 rounded text-xs font-medium transition-all ${playbackRate === rate
                                   ? 'bg-blue-600 text-white'
                                   : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-600'
-                              }`}
+                                }`}
                             >
                               {rate}x
                             </motion.button>
@@ -613,7 +614,7 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
                         </div>
                       </motion.div>
                     )}
-            </div>
+                  </div>
 
                   {/* Center Play Button */}
                   <div className="absolute inset-0 flex items-center justify-center pointer-events-auto">
@@ -621,21 +622,21 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
                       whileHover={{ scale: 1.1 }}
                       whileTap={{ scale: 0.9 }}
                       onClick={togglePlay}
-                      className="w-20 h-20 rounded-full bg-blue-600 hover:bg-blue-700 flex items-center justify-center text-white shadow-2xl"
+                      className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-blue-600 hover:bg-blue-700 flex items-center justify-center text-white shadow-2xl"
                     >
                       {isPlaying ? (
-                        <Pause className="w-10 h-10" />
+                        <Pause className="w-8 h-8 sm:w-10 sm:h-10" />
                       ) : (
-                        <Play className="w-10 h-10 ml-1" />
+                        <Play className="w-8 h-8 sm:w-10 sm:h-10 ml-0.5 sm:ml-1" />
                       )}
                     </motion.button>
                   </div>
 
                   {/* Bottom Controls */}
-                  <div className="absolute bottom-0 left-0 right-0 p-4 space-y-2 pointer-events-auto">
+                  <div className="absolute bottom-0 left-0 right-0 p-2 sm:p-4 space-y-2 pointer-events-auto">
                     {/* Progress Bar */}
                     <div
-                      className="w-full h-1.5 bg-white/20 rounded-full cursor-pointer group/progress hover:h-2 transition-all relative overflow-hidden"
+                      className="w-full h-1.5 sm:h-2 bg-white/20 rounded-full cursor-pointer group/progress hover:h-2 sm:hover:h-2.5 transition-all relative overflow-hidden"
                       onClick={handleSeek}
                     >
                       <motion.div
@@ -645,60 +646,60 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
                     </div>
 
                     {/* Control Buttons */}
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
+                      <div className="flex items-center gap-0.5 sm:gap-1">
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => skip(-10)}
-                          className="text-white hover:bg-white/20 border-0"
+                          className="text-white hover:bg-white/20 border-0 h-8 w-8 sm:h-10 sm:w-auto sm:px-3"
                           title="Rewind 10s (←)"
                         >
-                          <RotateCcw className="w-4 h-4" />
+                          <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                         </Button>
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={togglePlay}
-                          className="text-white hover:bg-white/20 border-0"
+                          className="text-white hover:bg-white/20 border-0 h-8 w-8 sm:h-10 sm:w-auto sm:px-3"
                           title="Play/Pause (Space)"
                         >
                           {isPlaying ? (
-                            <Pause className="w-4 h-4" />
+                            <Pause className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                           ) : (
-                            <Play className="w-4 h-4" />
+                            <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                           )}
                         </Button>
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => skip(10)}
-                          className="text-white hover:bg-white/20 border-0"
+                          className="text-white hover:bg-white/20 border-0 h-8 w-8 sm:h-10 sm:w-auto sm:px-3"
                           title="Forward 10s (→)"
                         >
-                          <RotateCw className="w-4 h-4" />
+                          <RotateCw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                         </Button>
                       </div>
 
-                      <div className="flex items-center gap-2 flex-1">
-                        <span className="text-white text-sm font-mono">
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <span className="text-white text-xs sm:text-sm font-mono whitespace-nowrap">
                           {formatTime(currentTime)} / {formatTime(duration)}
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1 sm:gap-2">
+                        <div className="flex items-center gap-0.5 sm:gap-1">
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={toggleMute}
-                            className="text-white hover:bg-white/20 border-0"
+                            className="text-white hover:bg-white/20 border-0 h-8 w-8 sm:h-10 sm:w-auto sm:px-3"
                             title="Mute (M)"
                           >
                             {isMuted || volume === 0 ? (
-                              <VolumeX className="w-4 h-4" />
+                              <VolumeX className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                             ) : (
-                              <Volume2 className="w-4 h-4" />
+                              <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                             )}
                           </Button>
                           <input
@@ -708,64 +709,64 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
                             step="0.01"
                             value={volume}
                             onChange={handleVolumeChange}
-                            className="w-20 h-1 bg-white/30 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                            className="w-12 sm:w-20 h-1 bg-white/30 rounded-lg appearance-none cursor-pointer accent-blue-600"
                           />
                         </div>
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={toggleFullscreen}
-                          className="text-white hover:bg-white/20 border-0"
+                          className="text-white hover:bg-white/20 border-0 h-8 w-8 sm:h-10 sm:w-auto sm:px-3"
                           title="Fullscreen (F)"
                         >
                           {isFullscreen ? (
-                            <Minimize className="w-4 h-4" />
+                            <Minimize className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                           ) : (
-                            <Maximize className="w-4 h-4" />
+                            <Maximize className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                           )}
                         </Button>
                       </div>
                     </div>
-        </div>
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>
           </div>
-          
+
           {/* Keyboard Shortcuts Help */}
-          <div className="p-3 bg-slate-900/50 border-t border-slate-700">
+          <div className="p-2 sm:p-3 bg-slate-900/50 border-t border-slate-700">
             <details className="text-xs text-slate-400">
-              <summary className="cursor-pointer hover:text-slate-300 font-medium transition-colors">⌨️ Keyboard Shortcuts</summary>
-              <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                <div className="flex items-center gap-2">
-                  <kbd className="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-300 font-mono">Space</kbd>
-                  <span className="text-slate-400">Play/Pause</span>
+              <summary className="cursor-pointer hover:text-slate-300 font-medium transition-colors text-xs sm:text-sm">⌨️ Keyboard Shortcuts</summary>
+              <div className="mt-2 sm:mt-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5 sm:gap-2 text-xs">
+                <div className="flex items-center gap-1 sm:gap-2">
+                  <kbd className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-slate-800 border border-slate-700 rounded text-slate-300 font-mono text-xs">Space</kbd>
+                  <span className="text-slate-400 text-xs">Play/Pause</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <kbd className="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-300 font-mono">←→</kbd>
-                  <span className="text-slate-400">Seek</span>
+                <div className="flex items-center gap-1 sm:gap-2">
+                  <kbd className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-slate-800 border border-slate-700 rounded text-slate-300 font-mono text-xs">←→</kbd>
+                  <span className="text-slate-400 text-xs">Seek</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <kbd className="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-300 font-mono">↑↓</kbd>
-                  <span className="text-slate-400">Volume</span>
+                <div className="flex items-center gap-1 sm:gap-2">
+                  <kbd className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-slate-800 border border-slate-700 rounded text-slate-300 font-mono text-xs">↑↓</kbd>
+                  <span className="text-slate-400 text-xs">Volume</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <kbd className="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-300 font-mono">M</kbd>
-                  <span className="text-slate-400">Mute</span>
+                <div className="flex items-center gap-1 sm:gap-2">
+                  <kbd className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-slate-800 border border-slate-700 rounded text-slate-300 font-mono text-xs">M</kbd>
+                  <span className="text-slate-400 text-xs">Mute</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <kbd className="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-300 font-mono">F</kbd>
-                  <span className="text-slate-400">Fullscreen</span>
+                <div className="flex items-center gap-1 sm:gap-2">
+                  <kbd className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-slate-800 border border-slate-700 rounded text-slate-300 font-mono text-xs">F</kbd>
+                  <span className="text-slate-400 text-xs">Fullscreen</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <kbd className="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-300 font-mono">C</kbd>
-                  <span className="text-slate-400">Subtitles</span>
+                <div className="flex items-center gap-1 sm:gap-2">
+                  <kbd className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-slate-800 border border-slate-700 rounded text-slate-300 font-mono text-xs">C</kbd>
+                  <span className="text-slate-400 text-xs">Subtitles</span>
                 </div>
               </div>
             </details>
           </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
     </motion.div>
   );
 }

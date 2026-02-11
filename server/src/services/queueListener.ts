@@ -127,6 +127,9 @@ export const setupQueueListeners = () => {
       subtitleS3Key = result?.subtitleS3Key;
     }
 
+    const outputS3Key = result?.outputS3Key;
+    console.log(`   Extracted outputS3Key: ${outputS3Key || 'NOT FOUND'}`);
+
     const updateData: any = { status: 'completed', progress: 100 };
     if (subtitleS3Key && subtitleS3Key.trim() !== '') {
       updateData.subtitleS3Key = subtitleS3Key;
@@ -135,6 +138,11 @@ export const setupQueueListeners = () => {
       console.warn(`   ⚠️  No valid subtitleS3Key found in returnvalue for job ${jobId}`);
       console.warn(`   Full returnvalue:`, JSON.stringify(returnvalue, null, 2));
       console.warn(`   Parsed result:`, JSON.stringify(result, null, 2));
+    }
+    
+    if (outputS3Key && outputS3Key.trim() !== '') {
+      updateData.outputS3Key = outputS3Key;
+      console.log(`   ✅ Updating video ${jobId} with outputS3Key: ${outputS3Key}`);
     }
 
     // Update the video in database

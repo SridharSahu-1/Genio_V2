@@ -92,6 +92,31 @@ export const directUpload = async (req: FastifyRequest, reply: FastifyReply) => 
 
     console.log(`✅ File uploaded to S3: ${cleanKey} (${fileBuffer.length} bytes)`);
 
+    // Get trim parameters from form data (multipart fields)
+    let trimStart: number | undefined;
+    let trimEnd: number | undefined;
+    
+    // Try to get trim parameters from the multipart form
+    try {
+      const trimStartField = data.fields?.trimStart;
+      const trimEndField = data.fields?.trimEnd;
+      
+      if (trimStartField && typeof trimStartField === 'string') {
+        trimStart = parseFloat(trimStartField);
+        if (isNaN(trimStart)) trimStart = undefined;
+      }
+      
+      if (trimEndField && typeof trimEndField === 'string') {
+        trimEnd = parseFloat(trimEndField);
+        if (isNaN(trimEnd)) trimEnd = undefined;
+      }
+    } catch (e) {
+      // If fields are not available, try body
+      const body = req.body as any;
+      if (body?.trimStart) trimStart = parseFloat(body.trimStart);
+      if (body?.trimEnd) trimEnd = parseFloat(body.trimEnd);
+    }
+
     // Create video entry
     const video = await Video.create({
       user: userId,
@@ -99,6 +124,8 @@ export const directUpload = async (req: FastifyRequest, reply: FastifyReply) => 
       originalKey: cleanKey,
       s3Key: cleanKey,
       status: 'pending',
+      trimStart,
+      trimEnd,
     });
 
     console.log(`✅ Created video entry - ID: ${video._id}, S3 Key: ${cleanKey}`);
@@ -162,7 +189,7 @@ const checkFileContentType = (filePath: string): Promise<boolean> => {
 export const uploadFromUrl = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const userId = (req.user as any).id;
-    const { url } = req.body as { url: string };
+    const { url, trimStart, trimEnd } = req.body as { url: string; trimStart?: number; trimEnd?: number };
 
     if (!url || typeof url !== 'string') {
       return reply.code(400).send({ message: 'Valid URL is required' });
@@ -393,6 +420,8 @@ export const uploadFromUrl = async (req: FastifyRequest, reply: FastifyReply) =>
       originalKey: cleanS3KeyValue,
       s3Key: cleanS3KeyValue,
       status: 'pending',
+      trimStart: trimStart,
+      trimEnd: trimEnd,
     });
 
     console.log(`✅ Created video entry - ID: ${video._id}, S3 Key: ${cleanS3KeyValue}`);
@@ -526,12 +555,20 @@ export const startProcessing = async (req: FastifyRequest, reply: FastifyReply) 
     console.log(`Doc ID: ${video._id}`);
     console.log('======================================================================');
 
+    // Normalize trim values so we never pass null to addVideoJob
+    const normalizedTrimStart: number | undefined =
+      video.trimStart !== null && video.trimStart !== undefined ? video.trimStart : undefined;
+    const normalizedTrimEnd: number | undefined =
+      video.trimEnd !== null && video.trimEnd !== undefined ? video.trimEnd : undefined;
+
     await addVideoJob(
       videoUrl, // Presigned S3 URL
       cleanKey, // S3 key
       hfToken || '',
       videoId,
-      video._id.toString()
+      video._id.toString(),
+      normalizedTrimStart,
+      normalizedTrimEnd
     );
 
     video.status = 'processing';
@@ -651,12 +688,12 @@ export const getVideoPlaybackUrl = async (req: FastifyRequest, reply: FastifyRep
       originalKey: video.originalKey
     }, null, 2));
 
-    // Generate presigned URL for S3 video
-    const videoS3Key = video.s3Key || video.originalKey;
+    // Use output video if available, otherwise use original
+    const videoS3Key = video.outputS3Key || video.s3Key || video.originalKey;
     let videoUrl: string;
     try {
       videoUrl = await getPresignedUrl(videoS3Key, 3600); // 1 hour expiry
-      console.log(`✅ Generated presigned URL for video: ${videoS3Key}`);
+      console.log(`✅ Generated presigned URL for video: ${videoS3Key} ${video.outputS3Key ? '(output video)' : '(original video)'}`);
     } catch (error: any) {
       console.error(`❌ Failed to generate presigned URL for video: ${error.message}`);
       return reply.code(500).send({ message: 'Failed to generate video URL' });

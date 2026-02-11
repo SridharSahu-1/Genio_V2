@@ -73,6 +73,11 @@ export default function Dashboard() {
   const [file, setFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState<string>('');
   const [uploadMode, setUploadMode] = useState<'file' | 'url'>('file');
+  const [videoDuration, setVideoDuration] = useState<number>(0);
+  const [trimStart, setTrimStart] = useState<number>(0);
+  const [trimEnd, setTrimEnd] = useState<number>(0);
+  const [showTrimOptions, setShowTrimOptions] = useState(false);
+  const videoPreviewRef = useRef<HTMLVideoElement>(null);
   const [playingVideo, setPlayingVideo] = useState<PlaybackData | null>(null);
   const [editingVideo, setEditingVideo] = useState<PlaybackData | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -187,9 +192,24 @@ export default function Dashboard() {
 
   const onDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
-      setFile(acceptedFiles[0]);
+      const selectedFile = acceptedFiles[0];
+      setFile(selectedFile);
       setUploadProgress(0);
       setUploadMode('file');
+      setTrimStart(0);
+      setTrimEnd(0);
+      setShowTrimOptions(false);
+
+      // Load video to get duration
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.onloadedmetadata = () => {
+        window.URL.revokeObjectURL(video.src);
+        const duration = video.duration;
+        setVideoDuration(duration);
+        setTrimEnd(duration);
+      };
+      video.src = URL.createObjectURL(selectedFile);
     }
   };
 
@@ -227,6 +247,10 @@ export default function Dashboard() {
 
         const formData = new FormData();
         formData.append('file', file!);
+        if (showTrimOptions && (trimStart > 0 || trimEnd < videoDuration)) {
+          formData.append('trimStart', trimStart.toString());
+          formData.append('trimEnd', trimEnd.toString());
+        }
 
         uploadRes = await api.post('/api/videos/upload-direct', formData, {
           headers: {
@@ -256,9 +280,14 @@ export default function Dashboard() {
 
         console.log(`📤 Uploading video from URL: ${videoUrl}`);
 
-        uploadRes = await api.post('/api/videos/upload-url', {
+        const uploadData: any = {
           url: videoUrl.trim(),
-        });
+        };
+        if (showTrimOptions && (trimStart > 0 || trimEnd > 0)) {
+          uploadData.trimStart = trimStart;
+          uploadData.trimEnd = trimEnd;
+        }
+        uploadRes = await api.post('/api/videos/upload-url', uploadData);
 
         clearInterval(progressInterval);
         setUploadProgress(100);
@@ -305,7 +334,7 @@ export default function Dashboard() {
         } else if (status === 400) {
           errorMessage = `Bad request: ${data?.message || statusText}.`;
         } else if (status === 413) {
-          errorMessage = 'File too large. Maximum size is 500MB.';
+          errorMessage = 'File too large. Maximum size is 4GB.';
         }
       } else if (uploadError.request) {
         errorMessage = 'Upload failed: No response from server. Check your network connection.';
@@ -477,7 +506,7 @@ export default function Dashboard() {
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
             transition={{ duration: 0.3 }}
-            className="p-6 md:p-8 lg:p-12"
+            className="p-3 sm:p-4 md:p-6 lg:p-8 xl:p-12"
           >
             <VideoPlayer
               videoUrl={playingVideo.videoUrl}
@@ -492,7 +521,7 @@ export default function Dashboard() {
             onClose={() => setEditingVideo(null)}
           />
         ) : (
-          <div className="p-6 md:p-8 lg:p-12 max-w-7xl mx-auto">
+          <div className="p-3 sm:p-4 md:p-6 lg:p-8 xl:p-12 max-w-7xl mx-auto">
             {/* Hero Section */}
             <motion.div
               ref={heroRef}
@@ -503,7 +532,7 @@ export default function Dashboard() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.8 }}
-                className="text-5xl md:text-7xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400"
+                className="text-3xl sm:text-4xl md:text-5xl lg:text-7xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 px-4"
               >
                 Transform Videos with AI
               </motion.h1>
@@ -511,7 +540,7 @@ export default function Dashboard() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.8, delay: 0.2 }}
-                className="text-xl text-slate-400 max-w-2xl mx-auto"
+                className="text-base sm:text-lg md:text-xl text-slate-400 max-w-2xl mx-auto px-4"
               >
                 Professional video editing, AI-powered subtitles, and seamless workflow
               </motion.p>
@@ -535,10 +564,10 @@ export default function Dashboard() {
                     animate={{ scale: 1, opacity: 1 }}
                     exit={{ scale: 0.9, opacity: 0 }}
                     onClick={(e) => e.stopPropagation()}
-                    className="bg-slate-900 border border-slate-700 rounded-2xl p-8 max-w-2xl w-full shadow-2xl"
+                    className="bg-slate-900 border border-slate-700 rounded-2xl p-4 sm:p-6 md:p-8 max-w-2xl w-full shadow-2xl max-h-[90vh] overflow-y-auto"
                   >
-                    <div className="flex justify-between items-start mb-6">
-                      <h2 className="text-2xl font-bold text-white">Welcome to Genio AI</h2>
+                    <div className="flex justify-between items-start mb-4 sm:mb-6 gap-4">
+                      <h2 className="text-xl sm:text-2xl font-bold text-white">Welcome to Genio AI</h2>
                       <Button
                         variant="ghost"
                         size="sm"
@@ -546,40 +575,40 @@ export default function Dashboard() {
                           setShowOnboarding(false);
                           localStorage.setItem('onboardingDismissed', 'true');
                         }}
-                        className="text-slate-400 hover:text-white"
+                        className="text-slate-400 hover:text-white flex-shrink-0"
                       >
                         <X className="w-5 h-5" />
                       </Button>
                     </div>
 
-                    <div className="space-y-6">
-                      <div className="flex items-start gap-4">
-                        <div className="p-3 bg-blue-500/20 rounded-lg">
-                          <Upload className="w-6 h-6 text-blue-400" />
+                    <div className="space-y-4 sm:space-y-6">
+                      <div className="flex items-start gap-3 sm:gap-4">
+                        <div className="p-2 sm:p-3 bg-blue-500/20 rounded-lg flex-shrink-0">
+                          <Upload className="w-5 h-5 sm:w-6 sm:h-6 text-blue-400" />
                         </div>
-                        <div>
-                          <h3 className="font-semibold text-white mb-1">1. Upload Your Video</h3>
-                          <p className="text-slate-400 text-sm">Drag & drop or paste a URL to get started</p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-start gap-4">
-                        <div className="p-3 bg-purple-500/20 rounded-lg">
-                          <Sparkles className="w-6 h-6 text-purple-400" />
-                        </div>
-                        <div>
-                          <h3 className="font-semibold text-white mb-1">2. AI Generates Subtitles</h3>
-                          <p className="text-slate-400 text-sm">Watch as AI automatically transcribes your video</p>
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-semibold text-white mb-1 text-sm sm:text-base">1. Upload Your Video</h3>
+                          <p className="text-slate-400 text-xs sm:text-sm">Drag & drop or paste a URL to get started</p>
                         </div>
                       </div>
 
-                      <div className="flex items-start gap-4">
-                        <div className="p-3 bg-green-500/20 rounded-lg">
-                          <Play className="w-6 h-6 text-green-400" />
+                      <div className="flex items-start gap-3 sm:gap-4">
+                        <div className="p-2 sm:p-3 bg-purple-500/20 rounded-lg flex-shrink-0">
+                          <Sparkles className="w-5 h-5 sm:w-6 sm:h-6 text-purple-400" />
                         </div>
-                        <div>
-                          <h3 className="font-semibold text-white mb-1">3. Edit & Export</h3>
-                          <p className="text-slate-400 text-sm">Crop, trim, add effects, and export your video</p>
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-semibold text-white mb-1 text-sm sm:text-base">2. AI Generates Subtitles</h3>
+                          <p className="text-slate-400 text-xs sm:text-sm">Watch as AI automatically transcribes your video</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-3 sm:gap-4">
+                        <div className="p-2 sm:p-3 bg-green-500/20 rounded-lg flex-shrink-0">
+                          <Play className="w-5 h-5 sm:w-6 sm:h-6 text-green-400" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-semibold text-white mb-1 text-sm sm:text-base">3. Edit & Export</h3>
+                          <p className="text-slate-400 text-xs sm:text-sm">Crop, trim, add effects, and export your video</p>
                         </div>
                       </div>
                     </div>
@@ -589,7 +618,7 @@ export default function Dashboard() {
                         setShowOnboarding(false);
                         localStorage.setItem('onboardingDismissed', 'true');
                       }}
-                      className="w-full mt-8 bg-blue-600 hover:bg-blue-700 text-white"
+                      className="w-full mt-6 sm:mt-8 bg-blue-600 hover:bg-blue-700 text-white h-11 sm:h-12"
                     >
                       Get Started
                       <ArrowRight className="w-4 h-4 ml-2" />
@@ -601,21 +630,21 @@ export default function Dashboard() {
 
             {/* Modern Header */}
             <div className="mb-8">
-              <div className="flex justify-between items-start mb-6">
-                <div>
+              <div className="flex flex-col sm:flex-row justify-between items-start gap-4 mb-6">
+                <div className="flex-1 min-w-0">
                   <motion.h1
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="text-3xl md:text-4xl font-bold mb-2 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400"
+                    className="text-2xl sm:text-3xl md:text-4xl font-bold mb-2 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400 break-words"
                   >
                     Welcome back, {user?.username}
                   </motion.h1>
-                  <p className="text-slate-400">Transform your videos with AI-powered subtitles</p>
+                  <p className="text-sm sm:text-base text-slate-400">Transform your videos with AI-powered subtitles</p>
                 </div>
                 <Button
                   onClick={logout}
                   variant="outline"
-                  className="bg-slate-900/50 hover:bg-slate-800/50 border-slate-700 text-slate-300 hover:text-white backdrop-blur-sm"
+                  className="bg-slate-900/50 hover:bg-slate-800/50 border-slate-700 text-slate-300 hover:text-white backdrop-blur-sm w-full sm:w-auto"
                 >
                   <LogOut className="w-4 h-4 mr-2" />
                   Logout
@@ -696,30 +725,32 @@ export default function Dashboard() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="pt-6 space-y-6">
-                      <div className="flex gap-3 p-1 bg-slate-800/50 rounded-lg">
+                      <div className="flex gap-2 sm:gap-3 p-1 bg-slate-800/50 rounded-lg">
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => setUploadMode('file')}
-                          className={`flex-1 transition-all ${uploadMode === 'file'
-                              ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/50'
-                              : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+                          className={`flex-1 transition-all text-xs sm:text-sm ${uploadMode === 'file'
+                            ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/50'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
                             }`}
                         >
-                          <FileVideo className="w-4 h-4 mr-2" />
-                          File Upload
+                          <FileVideo className="w-3 h-3 sm:w-4 sm:h-4 sm:mr-2" />
+                          <span className="hidden sm:inline">File Upload</span>
+                          <span className="sm:hidden">File</span>
                         </Button>
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => setUploadMode('url')}
-                          className={`flex-1 transition-all ${uploadMode === 'url'
-                              ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/50'
-                              : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+                          className={`flex-1 transition-all text-xs sm:text-sm ${uploadMode === 'url'
+                            ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/50'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
                             }`}
                         >
-                          <LinkIcon className="w-4 h-4 mr-2" />
-                          From URL
+                          <LinkIcon className="w-3 h-3 sm:w-4 sm:h-4 sm:mr-2" />
+                          <span className="hidden sm:inline">From URL</span>
+                          <span className="sm:hidden">URL</span>
                         </Button>
                       </div>
 
@@ -727,23 +758,23 @@ export default function Dashboard() {
                         <div className="space-y-4">
                           <div
                             {...getRootProps()}
-                            className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-all relative overflow-hidden group ${isDragActive
-                                ? 'border-blue-500 bg-blue-500/20 scale-105'
-                                : 'border-slate-700 hover:border-blue-500/50 bg-slate-800/30 hover:bg-slate-800/50'
+                            className={`border-2 border-dashed rounded-xl p-6 sm:p-8 md:p-12 text-center cursor-pointer transition-all relative overflow-hidden group ${isDragActive
+                              ? 'border-blue-500 bg-blue-500/20 scale-105'
+                              : 'border-slate-700 hover:border-blue-500/50 bg-slate-800/30 hover:bg-slate-800/50'
                               }`}
                           >
                             <input {...getInputProps()} />
                             <div className="relative z-10">
                               <motion.div
                                 animate={isDragActive ? { scale: 1.1, rotate: 5 } : { scale: 1, rotate: 0 }}
-                                className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-2xl mb-4"
+                                className="inline-flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 md:w-16 md:h-16 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-2xl mb-3 sm:mb-4"
                               >
-                                <Upload className={`w-8 h-8 ${isDragActive ? 'text-blue-400' : 'text-slate-400'}`} />
+                                <Upload className={`w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8 ${isDragActive ? 'text-blue-400' : 'text-slate-400'}`} />
                               </motion.div>
-                              <p className="text-slate-200 font-medium mb-2 text-lg">
+                              <p className="text-slate-200 font-medium mb-2 text-base sm:text-lg">
                                 {isDragActive ? 'Drop your video here' : 'Drag & drop your video'}
                               </p>
-                              <p className="text-sm text-slate-500">or click to browse files</p>
+                              <p className="text-xs sm:text-sm text-slate-500">or click to browse files</p>
                               <p className="text-xs text-slate-600 mt-2">Supports MP4, WebM, MOV, AVI, MKV</p>
                             </div>
                             {isDragActive && (
@@ -757,26 +788,149 @@ export default function Dashboard() {
                               <motion.div
                                 initial={{ opacity: 0, y: 10 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                className="mt-4 p-3 bg-slate-800/50 rounded-lg"
+                                className="mt-4 space-y-3"
                               >
-                                <div className="flex items-center gap-2 text-sm text-slate-300">
+                                <div className="flex items-center gap-2 text-sm text-slate-300 p-3 bg-slate-800/50 rounded-lg">
                                   <FileCheck className="w-4 h-4 text-green-400" />
                                   {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
+                                </div>
+
+                                {/* Video Trimming Options */}
+                                <div className="p-3 bg-slate-800/50 rounded-lg space-y-3">
+                                  <div className="flex items-center justify-between">
+                                    <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                                      <Scissors className="w-4 h-4" />
+                                      Trim Video (Optional)
+                                    </label>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => setShowTrimOptions(!showTrimOptions)}
+                                      className="text-xs h-7"
+                                    >
+                                      {showTrimOptions ? 'Hide' : 'Show'}
+                                    </Button>
+                                  </div>
+
+                                  {showTrimOptions && videoDuration > 0 && (
+                                    <div className="space-y-3 pt-2 border-t border-slate-700">
+                                      <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                          <Label className="text-xs text-slate-400 mb-1">Start Time (seconds)</Label>
+                                          <Input
+                                            type="number"
+                                            min="0"
+                                            max={videoDuration}
+                                            step="0.1"
+                                            value={trimStart}
+                                            onChange={(e) => {
+                                              const val = Math.max(0, Math.min(parseFloat(e.target.value) || 0, trimEnd));
+                                              setTrimStart(val);
+                                            }}
+                                            className="bg-slate-700/50 border-slate-600 text-white text-sm h-8"
+                                          />
+                                        </div>
+                                        <div>
+                                          <Label className="text-xs text-slate-400 mb-1">End Time (seconds)</Label>
+                                          <Input
+                                            type="number"
+                                            min={trimStart}
+                                            max={videoDuration}
+                                            step="0.1"
+                                            value={trimEnd}
+                                            onChange={(e) => {
+                                              const val = Math.max(trimStart, Math.min(parseFloat(e.target.value) || videoDuration, videoDuration));
+                                              setTrimEnd(val);
+                                            }}
+                                            className="bg-slate-700/50 border-slate-600 text-white text-sm h-8"
+                                          />
+                                        </div>
+                                      </div>
+                                      <div className="text-xs text-slate-400">
+                                        Duration: {Math.floor(trimEnd - trimStart)}s
+                                        {trimStart > 0 || trimEnd < videoDuration ? ` (trimmed from ${Math.floor(videoDuration)}s)` : ''}
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                               </motion.div>
                             )}
                           </div>
                         </div>
                       ) : (
-                        <div className="space-y-2">
-                          <Label className="text-slate-300">Video URL</Label>
-                          <Input
-                            type="url"
-                            placeholder="https://example.com/video.mp4"
-                            value={videoUrl}
-                            onChange={(e) => setVideoUrl(e.target.value)}
-                            className="bg-slate-800/50 border-slate-600 text-white placeholder:text-slate-500"
-                          />
+                        <div className="space-y-4">
+                          <div className="space-y-2">
+                            <Label className="text-slate-300">Video URL</Label>
+                            <Input
+                              type="url"
+                              placeholder="https://example.com/video.mp4"
+                              value={videoUrl}
+                              onChange={(e) => setVideoUrl(e.target.value)}
+                              className="bg-slate-800/50 border-slate-600 text-white placeholder:text-slate-500"
+                            />
+                          </div>
+
+                          {/* Video Trimming Options for URL */}
+                          <div className="p-3 bg-slate-800/50 rounded-lg space-y-3">
+                            <div className="flex items-center justify-between">
+                              <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                                <Scissors className="w-4 h-4" />
+                                Trim Video (Optional)
+                              </label>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setShowTrimOptions(!showTrimOptions)}
+                                className="text-xs h-7"
+                              >
+                                {showTrimOptions ? 'Hide' : 'Show'}
+                              </Button>
+                            </div>
+
+                            {showTrimOptions && (
+                              <div className="space-y-3 pt-2 border-t border-slate-700">
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <Label className="text-xs text-slate-400 mb-1">Start Time (seconds)</Label>
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      step="0.1"
+                                      value={trimStart}
+                                      onChange={(e) => {
+                                        const val = Math.max(0, parseFloat(e.target.value) || 0);
+                                        setTrimStart(val);
+                                        if (val >= trimEnd && trimEnd > 0) {
+                                          setTrimEnd(val + 1);
+                                        }
+                                      }}
+                                      className="bg-slate-700/50 border-slate-600 text-white text-sm h-8"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs text-slate-400 mb-1">End Time (seconds)</Label>
+                                    <Input
+                                      type="number"
+                                      min={trimStart}
+                                      step="0.1"
+                                      value={trimEnd || ''}
+                                      onChange={(e) => {
+                                        const val = Math.max(trimStart, parseFloat(e.target.value) || 0);
+                                        setTrimEnd(val);
+                                      }}
+                                      placeholder="Leave empty for full video"
+                                      className="bg-slate-700/50 border-slate-600 text-white text-sm h-8"
+                                    />
+                                  </div>
+                                </div>
+                                <div className="text-xs text-slate-400">
+                                  {trimEnd > trimStart ? `Duration: ${Math.floor(trimEnd - trimStart)}s` : 'Enter end time to trim'}
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
 
@@ -918,7 +1072,7 @@ export default function Dashboard() {
                             </div>
 
                             {video.status === 'completed' && (
-                              <div className="flex gap-2 mt-3 pt-3 border-t border-slate-700/50">
+                              <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-slate-700/50">
                                 <Button
                                   variant="outline"
                                   size="sm"
@@ -926,10 +1080,10 @@ export default function Dashboard() {
                                     e.stopPropagation();
                                     handleViewVideo(video._id);
                                   }}
-                                  className="flex-1 bg-blue-600/20 hover:bg-blue-600/30 border-blue-500/50 text-blue-300 text-xs h-8"
+                                  className="flex-1 min-w-[80px] bg-blue-600/20 hover:bg-blue-600/30 border-blue-500/50 text-blue-300 text-xs h-8 sm:h-9"
                                 >
                                   <Play className="w-3 h-3 mr-1" />
-                                  Play
+                                  <span className="hidden sm:inline">Play</span>
                                 </Button>
                                 <Button
                                   variant="outline"
@@ -938,10 +1092,10 @@ export default function Dashboard() {
                                     e.stopPropagation();
                                     handleEditVideo(video._id);
                                   }}
-                                  className="flex-1 bg-purple-600/20 hover:bg-purple-600/30 border-purple-500/50 text-purple-300 text-xs h-8"
+                                  className="flex-1 min-w-[80px] bg-purple-600/20 hover:bg-purple-600/30 border-purple-500/50 text-purple-300 text-xs h-8 sm:h-9"
                                 >
                                   <Edit3 className="w-3 h-3 mr-1" />
-                                  Edit
+                                  <span className="hidden sm:inline">Edit</span>
                                 </Button>
                                 {video.subtitleS3Key && (
                                   <Button
@@ -951,7 +1105,7 @@ export default function Dashboard() {
                                       e.stopPropagation();
                                       handleDownload(video.subtitleS3Key!);
                                     }}
-                                    className="bg-slate-700/50 hover:bg-slate-700 border-slate-600 text-slate-300 text-xs h-8 px-3"
+                                    className="bg-slate-700/50 hover:bg-slate-700 border-slate-600 text-slate-300 text-xs h-8 sm:h-9 px-3 flex-shrink-0"
                                     title="Download subtitles"
                                   >
                                     <Download className="w-3 h-3" />
