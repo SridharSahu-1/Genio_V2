@@ -46,8 +46,14 @@ const getRedisConnection = () => {
   }
 
   // Enable TLS for Upstash (rediss://) or if REDIS_TLS is set
-  if (process.env.REDIS_URL?.startsWith('rediss://') || process.env.REDIS_TLS === 'true' || process.env.REDIS_TLS === '1') {
-    connection.tls = {};
+  // Redis Cloud may need permissive TLS settings
+  const shouldUseTLS = process.env.REDIS_URL?.startsWith('rediss://') || 
+                       (process.env.REDIS_TLS === 'true' || process.env.REDIS_TLS === '1');
+  
+  if (shouldUseTLS) {
+    connection.tls = {
+      rejectUnauthorized: false, // Allow self-signed certificates (common with Redis Cloud)
+    };
     console.log('🔒 Using TLS for Redis connection');
   }
 
@@ -58,7 +64,7 @@ const connection = getRedisConnection();
 
 export const videoQueue = new Queue('video-processing', { connection });
 
-export const addVideoJob = async (videoUrlOrPath: string, videoKey: string, hfToken: string, videoId: string, docId: string) => {
+export const addVideoJob = async (videoUrlOrPath: string, videoKey: string, hfToken: string, videoId: string, docId: string, trimStart?: number, trimEnd?: number) => {
   // Check if it's a local file path (starts with /) or S3 URL/key
   const isLocalFile = videoUrlOrPath.startsWith('/') || (!videoUrlOrPath.startsWith('http'));
   const cleanKey = isLocalFile ? videoKey : cleanS3Key(videoKey);
@@ -83,7 +89,9 @@ export const addVideoJob = async (videoUrlOrPath: string, videoKey: string, hfTo
     isLocalFile: isLocalFile, // Flag to indicate local file
     hfToken,
     videoId,
-    docId
+    docId,
+    trimStart,
+    trimEnd
   }, {
     jobId: videoId,
     removeOnComplete: false,
