@@ -190,6 +190,30 @@ export default function Dashboard() {
     fetchVideos();
   }, [user, isLoading, fetchVideos]);
 
+  // Preview URL for selected file (revoke on cleanup)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const previewUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!file) {
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+        previewUrlRef.current = null;
+        setPreviewUrl(null);
+      }
+      return;
+    }
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    const url = URL.createObjectURL(file);
+    previewUrlRef.current = url;
+    setPreviewUrl(url);
+    return () => {
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+        previewUrlRef.current = null;
+      }
+    };
+  }, [file]);
+
   const onDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
       const selectedFile = acceptedFiles[0];
@@ -198,7 +222,7 @@ export default function Dashboard() {
       setUploadMode('file');
       setTrimStart(0);
       setTrimEnd(0);
-      setShowTrimOptions(false);
+      setShowTrimOptions(true);
 
       // Load video to get duration
       const video = document.createElement('video');
@@ -795,65 +819,164 @@ export default function Dashboard() {
                                   {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
                                 </div>
 
-                                {/* Video Trimming Options */}
-                                <div className="p-3 bg-slate-800/50 rounded-lg space-y-3">
-                                  <div className="flex items-center justify-between">
-                                    <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
-                                      <Scissors className="w-4 h-4" />
-                                      Trim Video (Optional)
-                                    </label>
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => setShowTrimOptions(!showTrimOptions)}
-                                      className="text-xs h-7"
-                                    >
-                                      {showTrimOptions ? 'Hide' : 'Show'}
-                                    </Button>
-                                  </div>
-
-                                  {showTrimOptions && videoDuration > 0 && (
-                                    <div className="space-y-3 pt-2 border-t border-slate-700">
-                                      <div className="grid grid-cols-2 gap-3">
-                                        <div>
-                                          <Label className="text-xs text-slate-400 mb-1">Start Time (seconds)</Label>
-                                          <Input
-                                            type="number"
-                                            min="0"
-                                            max={videoDuration}
-                                            step="0.1"
-                                            value={trimStart}
-                                            onChange={(e) => {
-                                              const val = Math.max(0, Math.min(parseFloat(e.target.value) || 0, trimEnd));
-                                              setTrimStart(val);
+                                {/* Video player + trim */}
+                                {previewUrl && (
+                                  <div className="rounded-lg overflow-hidden bg-black border border-slate-700">
+                                    <video
+                                      ref={videoPreviewRef}
+                                      src={previewUrl}
+                                      className="w-full max-h-[280px]"
+                                      controls
+                                      playsInline
+                                      onLoadedMetadata={() => {
+                                        const v = videoPreviewRef.current;
+                                        if (v && videoDuration === 0) {
+                                          setVideoDuration(v.duration);
+                                          setTrimEnd(v.duration);
+                                        }
+                                      }}
+                                      onTimeUpdate={() => {
+                                        const v = videoPreviewRef.current;
+                                        if (v) {
+                                          const t = v.currentTime;
+                                          if (t < trimStart) v.currentTime = trimStart;
+                                          if (trimEnd < videoDuration && t > trimEnd) v.currentTime = trimEnd;
+                                        }
+                                      }}
+                                    />
+                                    <div className="p-3 bg-slate-800/70 border-t border-slate-700">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                                          <Scissors className="w-4 h-4" />
+                                          Trim segment to upload
+                                        </label>
+                                        <div className="flex gap-2">
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-7 text-xs bg-slate-700/50 border-slate-600 text-slate-300"
+                                            onClick={() => {
+                                              const v = videoPreviewRef.current;
+                                              if (v) {
+                                                setTrimStart(Math.min(v.currentTime, trimEnd - 0.5));
+                                              }
                                             }}
-                                            className="bg-slate-700/50 border-slate-600 text-white text-sm h-8"
-                                          />
-                                        </div>
-                                        <div>
-                                          <Label className="text-xs text-slate-400 mb-1">End Time (seconds)</Label>
-                                          <Input
-                                            type="number"
-                                            min={trimStart}
-                                            max={videoDuration}
-                                            step="0.1"
-                                            value={trimEnd}
-                                            onChange={(e) => {
-                                              const val = Math.max(trimStart, Math.min(parseFloat(e.target.value) || videoDuration, videoDuration));
-                                              setTrimEnd(val);
+                                          >
+                                            Set start
+                                          </Button>
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-7 text-xs bg-slate-700/50 border-slate-600 text-slate-300"
+                                            onClick={() => {
+                                              const v = videoPreviewRef.current;
+                                              if (v) {
+                                                setTrimEnd(Math.max(v.currentTime, trimStart + 0.5));
+                                              }
                                             }}
-                                            className="bg-slate-700/50 border-slate-600 text-white text-sm h-8"
-                                          />
+                                          >
+                                            Set end
+                                          </Button>
                                         </div>
                                       </div>
-                                      <div className="text-xs text-slate-400">
-                                        Duration: {Math.floor(trimEnd - trimStart)}s
-                                        {trimStart > 0 || trimEnd < videoDuration ? ` (trimmed from ${Math.floor(videoDuration)}s)` : ''}
-                                      </div>
+                                      {videoDuration > 0 && (
+                                        <>
+                                          <div className="relative h-8 flex items-center">
+                                            <div className="flex-1 h-2 bg-slate-700 rounded-full relative overflow-visible">
+                                              <div
+                                                className="absolute inset-y-0 rounded-full bg-slate-600"
+                                                style={{
+                                                  left: `${(trimStart / videoDuration) * 100}%`,
+                                                  right: `${100 - (trimEnd / videoDuration) * 100}%`,
+                                                }}
+                                              />
+                                              <div
+                                                className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-blue-500 rounded-full border-2 border-white -ml-1.5 cursor-pointer"
+                                                style={{ left: `${(trimStart / videoDuration) * 100}%` }}
+                                                onMouseDown={(e) => {
+                                                  e.preventDefault();
+                                                  const onMove = (ev: MouseEvent) => {
+                                                    const rect = (e.target as HTMLElement).closest('div.flex-1')?.getBoundingClientRect();
+                                                    if (!rect) return;
+                                                    const pct = (ev.clientX - rect.left) / rect.width;
+                                                    const t = Math.max(0, Math.min(pct * videoDuration, trimEnd - 0.5));
+                                                    setTrimStart(t);
+                                                  };
+                                                  const onUp = () => {
+                                                    document.removeEventListener('mousemove', onMove);
+                                                    document.removeEventListener('mouseup', onUp);
+                                                  };
+                                                  document.addEventListener('mousemove', onMove);
+                                                  document.addEventListener('mouseup', onUp);
+                                                }}
+                                              />
+                                              <div
+                                                className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-blue-500 rounded-full border-2 border-white -ml-1.5 cursor-pointer"
+                                                style={{ left: `${(trimEnd / videoDuration) * 100}%` }}
+                                                onMouseDown={(e) => {
+                                                  e.preventDefault();
+                                                  const onMove = (ev: MouseEvent) => {
+                                                    const rect = (e.target as HTMLElement).closest('div.flex-1')?.getBoundingClientRect();
+                                                    if (!rect) return;
+                                                    const pct = (ev.clientX - rect.left) / rect.width;
+                                                    const t = Math.max(trimStart + 0.5, Math.min(pct * videoDuration, videoDuration));
+                                                    setTrimEnd(t);
+                                                  };
+                                                  const onUp = () => {
+                                                    document.removeEventListener('mousemove', onMove);
+                                                    document.removeEventListener('mouseup', onUp);
+                                                  };
+                                                  document.addEventListener('mousemove', onMove);
+                                                  document.addEventListener('mouseup', onUp);
+                                                }}
+                                              />
+                                            </div>
+                                            <span className="ml-2 text-xs text-slate-400 w-12 tabular-nums">
+                                              {Math.floor(trimEnd - trimStart)}s
+                                            </span>
+                                          </div>
+                                          <div className="grid grid-cols-2 gap-2 mt-2">
+                                            <div>
+                                              <Label className="text-xs text-slate-500">Start (s)</Label>
+                                              <Input
+                                                type="number"
+                                                min={0}
+                                                max={videoDuration}
+                                                step={0.1}
+                                                value={trimStart.toFixed(1)}
+                                                onChange={(e) => {
+                                                  const val = Math.max(0, Math.min(parseFloat(e.target.value) || 0, trimEnd - 0.5));
+                                                  setTrimStart(val);
+                                                }}
+                                                className="bg-slate-700/50 border-slate-600 text-white text-sm h-8"
+                                              />
+                                            </div>
+                                            <div>
+                                              <Label className="text-xs text-slate-500">End (s)</Label>
+                                              <Input
+                                                type="number"
+                                                min={trimStart}
+                                                max={videoDuration}
+                                                step={0.1}
+                                                value={trimEnd.toFixed(1)}
+                                                onChange={(e) => {
+                                                  const val = Math.max(trimStart + 0.5, Math.min(parseFloat(e.target.value) || videoDuration, videoDuration));
+                                                  setTrimEnd(val);
+                                                }}
+                                                className="bg-slate-700/50 border-slate-600 text-white text-sm h-8"
+                                              />
+                                            </div>
+                                          </div>
+                                          <p className="text-xs text-slate-500 mt-1">
+                                            Only the trimmed segment will be processed and saved. Output will be scaled to 720p and saved with subtitles.
+                                          </p>
+                                        </>
+                                      )}
                                     </div>
-                                  )}
-                                </div>
+                                  </div>
+                                )}
                               </motion.div>
                             )}
                           </div>

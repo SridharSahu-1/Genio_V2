@@ -15,31 +15,56 @@ const initUploadSchema = z.object({
   hfToken: z.string().optional(), // In production, store this securely or per user
 });
 
-// DIRECT UPLOAD - Upload directly to S3
+// DIRECT UPLOAD - Upload directly to S3 (with optional trim; worker trims and scales output)
 export const directUpload = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const userId = (req.user as any).id;
-    const data = await req.file();
+    let fileBuffer: Buffer | null = null;
+    let filename = '';
+    let trimStart: number | undefined;
+    let trimEnd: number | undefined;
 
-    if (!data) {
-      return reply.code(400).send({ message: 'No file provided' });
+    // Parse multipart: iterate parts to get file + trim fields
+    const parts = req.parts();
+    for await (const part of parts) {
+      if (part.type === 'file' && part.fieldname === 'file') {
+        const chunks: Buffer[] = [];
+        const fileStream: NodeJS.ReadableStream = part.file as any;
+        for await (const chunk of fileStream) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        fileBuffer = Buffer.concat(chunks);
+        filename = part.filename || 'video.mp4';
+      } else if (part.type === 'field') {
+        const str = String((part as any).value ?? '');
+        if (part.fieldname === 'trimStart') {
+          const n = parseFloat(str);
+          if (!isNaN(n)) trimStart = n;
+        } else if (part.fieldname === 'trimEnd') {
+          const n = parseFloat(str);
+          if (!isNaN(n)) trimEnd = n;
+        }
+      }
     }
 
-    const filename = data.filename;
+    if (!fileBuffer || fileBuffer.length === 0) {
+      return reply.code(400).send({ message: 'No file provided or file is empty' });
+    }
+
     const sanitizedFilename = filename
       .replace(/[<>:"|?*]/g, '_')
       .replace(/\s+/g, '_')
       .replace(/\/+/g, '_');
 
-    // Generate S3 key
     const s3Key = `uploads/${userId}/${Date.now()}-${sanitizedFilename}`;
     const cleanKey = cleanS3Key(s3Key);
 
     console.log(`📤 Uploading file directly to S3: ${filename}`);
     console.log(`   S3 Key: ${cleanKey}`);
-    console.log(`   User ID: ${userId}`);
+    if (trimStart != null || trimEnd != null) {
+      console.log(`   Trim: ${trimStart ?? 0}s - ${trimEnd ?? 'end'}s`);
+    }
 
-    // Initialize S3 client
     const accessKey = process.env.AWS_ACCESS_KEY_ID || '';
     const secretKey = process.env.AWS_SECRET_ACCESS_KEY || '';
     const region = process.env.AWS_REGION || 'us-east-1';
@@ -57,21 +82,6 @@ export const directUpload = async (req: FastifyRequest, reply: FastifyReply) => 
       },
     });
 
-    // Read file stream into buffer
-    const chunks: Buffer[] = [];
-    const fileStream: NodeJS.ReadableStream = data.file as any;
-
-    for await (const chunk of fileStream) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-
-    const fileBuffer = Buffer.concat(chunks);
-
-    if (fileBuffer.length === 0) {
-      return reply.code(400).send({ message: 'File is empty' });
-    }
-
-    // Detect content type from file extension
     const ext = path.extname(sanitizedFilename).toLowerCase();
     const contentTypeMap: Record<string, string> = {
       '.mp4': 'video/mp4',
@@ -82,7 +92,6 @@ export const directUpload = async (req: FastifyRequest, reply: FastifyReply) => 
     };
     const contentType = contentTypeMap[ext] || 'video/mp4';
 
-    // Upload to S3
     await s3Client.send(new PutObjectCommand({
       Bucket: bucket,
       Key: cleanKey,
@@ -92,32 +101,6 @@ export const directUpload = async (req: FastifyRequest, reply: FastifyReply) => 
 
     console.log(`✅ File uploaded to S3: ${cleanKey} (${fileBuffer.length} bytes)`);
 
-    // Get trim parameters from form data (multipart fields)
-    let trimStart: number | undefined;
-    let trimEnd: number | undefined;
-    
-    // Try to get trim parameters from the multipart form
-    try {
-      const trimStartField = data.fields?.trimStart;
-      const trimEndField = data.fields?.trimEnd;
-      
-      if (trimStartField && typeof trimStartField === 'string') {
-        trimStart = parseFloat(trimStartField);
-        if (isNaN(trimStart)) trimStart = undefined;
-      }
-      
-      if (trimEndField && typeof trimEndField === 'string') {
-        trimEnd = parseFloat(trimEndField);
-        if (isNaN(trimEnd)) trimEnd = undefined;
-      }
-    } catch (e) {
-      // If fields are not available, try body
-      const body = req.body as any;
-      if (body?.trimStart) trimStart = parseFloat(body.trimStart);
-      if (body?.trimEnd) trimEnd = parseFloat(body.trimEnd);
-    }
-
-    // Create video entry
     const video = await Video.create({
       user: userId,
       title: filename,

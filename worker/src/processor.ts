@@ -185,12 +185,14 @@ export const processVideo = async (job: Job) => {
     // Server saves to: /path/to/server/uploads/filename.mp4
     // Docker mount: /app/server-uploads/filename.mp4
     let actualPath = videoUrl;
-    const filename = path.basename(videoUrl) || `video-${videoId || Date.now()}.mp4`;
-    const dockerPath = path.join('/app/server-uploads', filename);
+    const originalFilename = path.basename(videoUrl) || `video-${videoId || Date.now()}.mp4`;
+    const dockerPath = path.join('/app/server-uploads', originalFilename);
+    // Use unique filename for temp copy to prevent collisions between concurrent jobs
+    const filename = `${videoId || docId || Date.now()}_${originalFilename}`;
 
     console.log(`   🔍 Looking for file:`);
     console.log(`      Original path: ${videoUrl}`);
-    console.log(`      Extracted filename: ${filename}`);
+    console.log(`      Extracted filename: ${originalFilename} (temp: ${filename})`);
 
     // Try Docker mount path if in Docker, otherwise try original path first
     console.log(`      Docker mount path: ${dockerPath}`);
@@ -217,9 +219,9 @@ export const processVideo = async (job: Job) => {
         try {
           const allFiles = fs.readdirSync('/app/server-uploads');
           const matchingFiles = allFiles.filter(f =>
-            f.includes(filename.split('-')[0]) || // Match user ID
-            f.endsWith(path.extname(filename)) || // Match extension
-            f.includes(path.basename(filename, path.extname(filename))) // Match base name
+            f.includes(originalFilename.split('-')[0]) || // Match user ID
+            f.endsWith(path.extname(originalFilename)) || // Match extension
+            f.includes(path.basename(originalFilename, path.extname(originalFilename))) // Match base name
           );
 
           if (matchingFiles.length > 0) {
@@ -254,11 +256,11 @@ export const processVideo = async (job: Job) => {
       // Try alternative paths
       const altPaths = [
         dockerPath,
-        path.join('/app', 'server-uploads', filename),
+        path.join('/app', 'server-uploads', originalFilename),
         videoUrl,
       ];
 
-      let found = false;
+          let found = false;
       for (const altPath of altPaths) {
         if (fs.existsSync(altPath)) {
           actualPath = altPath;
@@ -288,7 +290,7 @@ export const processVideo = async (job: Job) => {
             const allFiles = fs.readdirSync('/app/server-uploads');
             const recentFiles = allFiles.slice(-10);
             console.error(`   Recent files in Docker mount (${allFiles.length} total):`, recentFiles.join(', '));
-            console.error(`   Looking for filename containing: ${filename.split('-')[0]} (user ID)`);
+            console.error(`   Looking for filename containing: ${originalFilename.split('-')[0]} (user ID)`);
           } catch (err) {
             console.error(`   Could not list files: ${err}`);
           }
@@ -350,111 +352,23 @@ export const processVideo = async (job: Job) => {
     
     job.updateProgress(10);
   } else {
-    // DOWNLOAD FROM URL (S3 public URL)
+    // S3 PRESIGNED URL - Pass directly to Python script to download from S3
     if (!videoUrl || typeof videoUrl !== 'string' || !videoUrl.startsWith('http')) {
-      throw new Error(`Invalid or missing public video URL. videoUrl: ${videoUrl}. The bucket must be public and videoUrl must be a valid HTTP(S) URL.`);
+      throw new Error(`Invalid or missing S3 presigned URL. videoUrl: ${videoUrl}.`);
     }
 
     console.log('='.repeat(70));
-    console.log('📥 DOWNLOADING VIDEO FROM PUBLIC URL (HTTP)');
+    console.log('📥 USING S3 PRESIGNED URL');
     console.log('='.repeat(70));
-    console.log(`✅ Using public URL - downloading via HTTP`);
-    console.log(`   Video URL: ${videoUrl}`);
-    console.log(`   Video Key: "${videoKey}" (for reference only)`);
+    console.log(`✅ Video will be fetched directly from S3 by Python script`);
+    console.log(`   S3 presigned URL: ${videoUrl.substring(0, 80)}...`);
 
-    try {
-      console.log(`🔄 Downloading from URL...`);
-      const https = require('https');
-      const http = require('http');
-
-      const parsedUrl = new URL(videoUrl);
-      const protocol = parsedUrl.protocol === 'https:' ? https : http;
-
-      const filename = path.basename(videoKey) || `video-${videoId || Date.now()}.mp4`;
-      localVideoPath = path.join(tempDir, filename);
-
-      console.log(`   Downloading to: ${localVideoPath}`);
-      console.log(`   URL: ${videoUrl}`);
-
-      await new Promise((resolve, reject) => {
-        const fileStream = fs.createWriteStream(localVideoPath);
-        let downloadedBytes = 0;
-
-        const request = protocol.get(videoUrl, (response: any) => {
-          if (response.statusCode === 301 || response.statusCode === 302) {
-            fileStream.close();
-            if (fs.existsSync(localVideoPath)) {
-              try { fs.unlinkSync(localVideoPath); } catch { }
-            }
-            const redirectUrl = response.headers.location;
-            console.log(`   Following redirect to: ${redirectUrl}`);
-            protocol.get(redirectUrl!, (redirectResponse: any) => {
-              if (redirectResponse.statusCode !== 200) {
-                reject(new Error(`HTTP ${redirectResponse.statusCode}: Failed to download video from redirect URL`));
-                return;
-              }
-              redirectResponse.pipe(fileStream);
-              redirectResponse.on('data', (chunk: Buffer) => { downloadedBytes += chunk.length; });
-              fileStream.on('finish', () => {
-                fileStream.close();
-                console.log(`   Downloaded ${downloadedBytes} bytes`);
-                resolve(null);
-              });
-            }).on('error', (err: any) => {
-              fileStream.close();
-              if (fs.existsSync(localVideoPath)) fs.unlinkSync(localVideoPath);
-              reject(err);
-            });
-            return;
-          }
-
-          if (response.statusCode !== 200) {
-            fileStream.close();
-            reject(new Error(`HTTP ${response.statusCode}: Failed to download video from URL`));
-            return;
-          }
-
-          response.pipe(fileStream);
-          response.on('data', (chunk: Buffer) => {
-            downloadedBytes += chunk.length;
-          });
-
-          fileStream.on('finish', () => {
-            fileStream.close();
-            console.log(`   Downloaded ${downloadedBytes} bytes`);
-            resolve(null);
-          });
-        });
-
-        request.on('error', (err: any) => {
-          fileStream.close();
-          if (fs.existsSync(localVideoPath)) {
-            try { fs.unlinkSync(localVideoPath); } catch { }
-          }
-          reject(err);
-        });
-
-        fileStream.on('error', (err: any) => {
-          request.abort();
-          if (fs.existsSync(localVideoPath)) {
-            try { fs.unlinkSync(localVideoPath); } catch { }
-          }
-          reject(err);
-        });
-      });
-
-      const fileSize = fs.statSync(localVideoPath).size;
-      console.log(`✅ Successfully downloaded video to: ${localVideoPath}`);
-      console.log(`   File size: ${fileSize} bytes`);
-      job.updateProgress(10);
-    } catch (error: any) {
-      const errorMessage = error.message || 'Unknown error';
-      console.error(`❌ Failed to download video from URL: ${errorMessage}`);
-      console.error(`   URL: ${videoUrl}`);
-      console.error(`   Error type: ${error.name || 'Unknown'}`);
-      if (error.code) console.error(`   Error code: ${error.code}`);
-      throw new Error(`Failed to download video from URL: ${errorMessage}`);
-    }
+    // Use unique filename for Python to save the downloaded file (prevents collisions)
+    const baseName = path.basename(videoKey) || 'video';
+    const uniqueId = videoId || docId || Date.now();
+    const filename = `${uniqueId}_${baseName}`;
+    localVideoPath = path.join(tempDir, filename);
+    job.updateProgress(10);
   }
 
   // 2. Run Python Script
@@ -471,16 +385,24 @@ export const processVideo = async (job: Job) => {
 
     let currentProgress = 0;
 
-    // Build Python command args - use local file (already downloaded from S3)
+    // Build Python command args
     const pythonArgs = [scriptPath];
 
-    // Use local file (already downloaded from S3 using AWS credentials)
-    console.log(`📁 Using local file (downloaded from S3): ${localVideoPath}`);
-    pythonArgs.push('--input', localVideoPath);
+    if (isLocalFile) {
+      // Local file path - use downloaded/copied file directly
+      console.log(`📁 Using local file: ${localVideoPath}`);
+      pythonArgs.push('--input', localVideoPath);
+    } else {
+      // S3 presigned URL - Python will download directly from S3
+      console.log(`📁 Using S3 presigned URL (Python will download to: ${localVideoPath})`);
+      pythonArgs.push('--input_url', videoUrl!);
+      pythonArgs.push('--output_path', localVideoPath);
+    }
     pythonArgs.push('--token', hfToken);
     pythonArgs.push('--output_dir', tempDir);
 
-    console.log(`Python command: ${pythonCmd} ${scriptPath} --input ${localVideoPath} --token [TOKEN] --output_dir ${tempDir}`);
+    const pyInputArg = isLocalFile ? `--input ${localVideoPath}` : `--input_url [S3_URL] --output_path ${localVideoPath}`;
+    console.log(`Python command: ${pythonCmd} ${scriptPath} ${pyInputArg} --token [TOKEN] --output_dir ${tempDir}`);
     // Set environment variables for Python subprocess to match standalone execution
     const pythonEnv = {
       ...process.env,
@@ -696,11 +618,15 @@ export const processVideo = async (job: Job) => {
           const assFilePath = path.join(tempDir, assFiles[0]);
           const outputVideoPath = path.join(tempDir, `output_${docId || videoId || Date.now()}.mp4`);
           
-          // Build ffmpeg command to burn subtitles into video
-          // Use the (possibly trimmed) localVideoPath - it's already trimmed if needed
+          // Build ffmpeg command: scale output to 720p then burn subtitles
+          // scale=-2:720 keeps aspect ratio (width divisible by 2 for encoder)
+          const escapedAss = assFilePath.replace(/:/g, '\\:').replace(/'/g, "\\'");
+          const scaleFilter = 'scale=-2:720';
+          const subtitlesFilter = `subtitles=${escapedAss}:force_style='FontSize=24,PrimaryColour=&Hffffff,OutlineColour=&H000000,Outline=2'`;
+          const vf = `${scaleFilter},${subtitlesFilter}`;
           const ffmpegArgs: string[] = [
             '-i', localVideoPath,
-            '-vf', `subtitles=${assFilePath.replace(/:/g, '\\:').replace(/'/g, "\\'")}:force_style='FontSize=24,PrimaryColour=&Hffffff,OutlineColour=&H000000,Outline=2'`,
+            '-vf', vf,
             '-c:v', 'libx264',
             '-c:a', 'copy',
             '-preset', 'medium',
