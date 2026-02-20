@@ -53,6 +53,7 @@ interface Video {
   createdAt: string;
   subtitleKey?: string;
   subtitleS3Key?: string;
+  outputS3Key?: string;
   progress?: number;
   docId?: string;
 }
@@ -120,14 +121,18 @@ export default function Dashboard() {
       }
     });
 
-    socket.on('video-completed', ({ videoId, subtitleS3Key }) => {
-      console.log(`✅ Video ${videoId} completed, subtitleS3Key:`, subtitleS3Key);
-      console.log(`   SubtitleS3Key type: ${typeof subtitleS3Key}`);
-      console.log(`   SubtitleS3Key value: "${subtitleS3Key}"`);
+    socket.on('video-completed', ({ videoId, subtitleS3Key, outputS3Key }) => {
+      console.log(`✅ Video ${videoId} completed, subtitleS3Key:`, subtitleS3Key, 'outputS3Key:', outputS3Key);
 
       setVideos((prev) => prev.map(v =>
         v._id === videoId
-          ? { ...v, status: 'completed', progress: 100, subtitleS3Key: subtitleS3Key || v.subtitleS3Key }
+          ? {
+              ...v,
+              status: 'completed',
+              progress: 100,
+              subtitleS3Key: subtitleS3Key || v.subtitleS3Key,
+              outputS3Key: outputS3Key ?? v.outputS3Key,
+            }
           : v
       ));
 
@@ -135,8 +140,8 @@ export default function Dashboard() {
         fetchVideos();
       }, 500);
 
-      if (subtitleS3Key) {
-        toast.success('Video processing completed! Subtitles are ready.');
+      if (subtitleS3Key || outputS3Key) {
+        toast.success('Video processing completed! Output video and subtitles are ready.');
       } else {
         toast.warning('Video processing completed, but subtitle key not found. Please refresh.');
       }

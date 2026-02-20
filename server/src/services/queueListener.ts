@@ -161,16 +161,18 @@ export const setupQueueListeners = () => {
         status: verifyVideo.status
       }, null, 2));
       
-      // Emit the completion event with the verified subtitleS3Key
+      // Emit the completion event with the verified subtitleS3Key and outputS3Key
       const finalSubtitleS3Key = verifyVideo.subtitleS3Key || subtitleS3Key;
-      console.log(`   📤 Emitting video-completed event with subtitleS3Key: ${finalSubtitleS3Key || 'NOT SET'}`);
-      io.emit('video-completed', { 
-        videoId: jobId, 
-        subtitleS3Key: finalSubtitleS3Key 
+      const finalOutputS3Key = verifyVideo.outputS3Key || outputS3Key;
+      console.log(`   📤 Emitting video-completed event with subtitleS3Key: ${finalSubtitleS3Key || 'NOT SET'}, outputS3Key: ${finalOutputS3Key || 'NOT SET'}`);
+      io.emit('video-completed', {
+        videoId: jobId,
+        subtitleS3Key: finalSubtitleS3Key,
+        outputS3Key: finalOutputS3Key ?? undefined,
       });
     } else {
       console.error(`   ❌ Video ${jobId} not found after update!`);
-      io.emit('video-completed', { videoId: jobId, subtitleS3Key: subtitleS3Key });
+      io.emit('video-completed', { videoId: jobId, subtitleS3Key: subtitleS3Key, outputS3Key: outputS3Key ?? undefined });
     }
     console.log('='.repeat(70));
   });

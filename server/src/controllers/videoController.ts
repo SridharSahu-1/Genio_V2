@@ -666,12 +666,13 @@ export const getVideoPlaybackUrl = async (req: FastifyRequest, reply: FastifyRep
     console.log(`   Full video object:`, JSON.stringify({
       _id: video._id,
       subtitleS3Key: video.subtitleS3Key,
+      outputS3Key: video.outputS3Key,
       status: video.status,
       s3Key: video.s3Key,
       originalKey: video.originalKey
     }, null, 2));
 
-    // Use output video if available, otherwise use original
+    // Use processed output video (with burned-in subtitles) if available, otherwise original
     const videoS3Key = video.outputS3Key || video.s3Key || video.originalKey;
     let videoUrl: string;
     try {
