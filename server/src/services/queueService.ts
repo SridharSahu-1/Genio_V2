@@ -45,11 +45,9 @@ const getRedisConnection = () => {
     connection.password = process.env.REDIS_PASSWORD;
   }
 
-  // Enable TLS for Upstash (rediss://) or if REDIS_TLS is set
-  // Redis Cloud may need permissive TLS settings
-  const shouldUseTLS = process.env.REDIS_URL?.startsWith('rediss://') || 
-                       (process.env.REDIS_TLS === 'true' || process.env.REDIS_TLS === '1');
-  
+  // Enable TLS for Upstash (rediss://) or if REDIS_TLS is set. Redis Cloud may need permissive TLS.
+  const shouldUseTLS = process.env.REDIS_URL?.startsWith('rediss://') ||
+    (process.env.REDIS_TLS === 'true' || process.env.REDIS_TLS === '1');
   if (shouldUseTLS) {
     connection.tls = {
       rejectUnauthorized: false, // Allow self-signed certificates (common with Redis Cloud)
@@ -60,11 +58,13 @@ const getRedisConnection = () => {
   return connection;
 };
 
-const connection = getRedisConnection();
+const redisConnection = getRedisConnection();
 
-export const videoQueue = new Queue('video-processing', { connection });
+export const videoQueue = new Queue('video-processing', {
+  connection: redisConnection,
+});
 
-export const addVideoJob = async (videoUrlOrPath: string, videoKey: string, hfToken: string, videoId: string, docId: string, trimStart?: number, trimEnd?: number) => {
+export const addVideoJob = async (videoUrlOrPath: string, videoKey: string, hfToken: string, videoId: string, docId: string, trimStart?: number, trimEnd?: number, aspectRatio?: string) => {
   // Check if it's a local file path (starts with /) or S3 URL/key
   const isLocalFile = videoUrlOrPath.startsWith('/') || (!videoUrlOrPath.startsWith('http'));
   const cleanKey = isLocalFile ? videoKey : cleanS3Key(videoKey);
@@ -77,6 +77,7 @@ export const addVideoJob = async (videoUrlOrPath: string, videoKey: string, hfTo
   console.log(`Video Key: "${cleanKey}"`);
   console.log(`Is Local File: ${isLocalFile ? 'YES ✅' : 'NO (S3)'}`);
   console.log(`Doc ID: ${docId}`);
+  if (aspectRatio) console.log(`Aspect ratio: ${aspectRatio}`);
   if (!isLocalFile) {
     console.log(`Bucket: ${process.env.AWS_S3_BUCKET || 'NOT SET'}`);
     console.log(`Region: ${process.env.AWS_REGION || 'us-east-1'}`);
@@ -91,7 +92,8 @@ export const addVideoJob = async (videoUrlOrPath: string, videoKey: string, hfTo
     videoId,
     docId,
     trimStart,
-    trimEnd
+    trimEnd,
+    aspectRatio: aspectRatio && aspectRatio.trim() ? aspectRatio.trim() : undefined,
   }, {
     jobId: videoId,
     removeOnComplete: false,

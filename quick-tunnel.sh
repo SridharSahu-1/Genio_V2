@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Quick Cloudflare Tunnel - Get HTTPS URL in 30 seconds
-# This creates a temporary tunnel for immediate use
+# Quick Cloudflare Tunnel - TEMPORARY use only (e.g. testing).
+# This creates a new random URL every time. For a stable URL so you don't
+# have to redeploy the client, use a named tunnel once — see DEPLOYMENT.md.
 
 INSTANCE_IP="3.84.220.241"
 SSH_USER="ec2-user"
@@ -35,10 +36,11 @@ if [ "$USER" = "ec2-user" ] || [ -n "$EC2_INSTANCE_ID" ] || [[ "$(hostname 2>/de
     exit 1
 fi
 
-echo -e "${BLUE}⚡ Quick Cloudflare Tunnel${NC}"
-echo -e "${BLUE}==========================${NC}"
+echo -e "${BLUE}⚡ Quick Cloudflare Tunnel (temporary only)${NC}"
+echo -e "${BLUE}============================================${NC}"
 echo ""
-echo "This will give you an HTTPS URL immediately!"
+echo -e "${YELLOW}This URL will change every time you run this script.${NC}"
+echo -e "For a stable API URL (no client redeploy), see DEPLOYMENT.md."
 echo ""
 
 # Find key file

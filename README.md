@@ -3,35 +3,35 @@
 ## Architecture
 - **Frontend**: Next.js 14, Shadcn/UI, Tailwind (Port: 3000)
 - **Backend**: Fastify, Mongoose, BullMQ (Port: 5001)
-- **Worker**: Node.js + Python (WhisperX)
+- **Worker**: Node.js + Python (WhisperX) — **must be running for video processing**
 - **Infrastructure**: Docker (MongoDB, Redis)
 
 ## Setup
 
-1. **Start Infrastructure**:
+1. **Start Infrastructure** (MongoDB, Redis):
    ```bash
    docker-compose up -d
    ```
 
-2. **Backend**:
-   ```bash
-   cd server
-   npm install
-   # Create .env from example (or use defaults)
-   npm run dev
-   ```
+2. **Backend + Worker** (both required for upload → subtitle generation):
+   - **Option A – one command from repo root** (recommended):
+     ```bash
+     npm install
+     npm run dev
+     ```
+     This runs the **server** and **worker** together. Keep this terminal open.
+   - **Option B – two terminals**:
+     - Terminal 1 (server):
+       ```bash
+       cd server && npm install && npm run dev
+       ```
+     - Terminal 2 (worker):
+       ```bash
+       cd worker && npm install && npm run dev
+       ```
+   **Important:** If only the server is running, uploads will succeed but jobs will sit in the queue and videos will never get subtitles. You must have the **worker** running for processing.
 
-3. **Worker**:
-   ```bash
-   cd worker
-   npm install
-   # Create .env from example (or use defaults)
-   # Ensure python dependencies are installed:
-   # pip install whisperx torch gc-python
-   npm run dev
-   ```
-
-4. **Frontend**:
+3. **Frontend** (separate terminal):
    ```bash
    cd client
    npm install
@@ -85,6 +85,13 @@ HF_TOKEN=your-huggingface-token
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:5001
 ```
+
+## Production deployment (EC2 + Vercel)
+
+Server and worker run on EC2; the client is on Vercel. To get a **stable API URL** so you don’t have to redeploy the client when you push backend changes, use a **named Cloudflare Tunnel** (one-time setup). See **[DEPLOYMENT.md](./DEPLOYMENT.md)** for the full guide.
+
+- **Routine deploy (server/worker only):** `./deploy-to-ec2.sh` — no client redeploy needed.
+- **SSH to EC2:** `./connect-ec2.sh`
 
 ## AWS Deployment Checklist
 
