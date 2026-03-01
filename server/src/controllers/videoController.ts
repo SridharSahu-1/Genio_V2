@@ -23,8 +23,9 @@ export const directUpload = async (req: FastifyRequest, reply: FastifyReply) => 
     let filename = '';
     let trimStart: number | undefined;
     let trimEnd: number | undefined;
+    let aspectRatio: string | undefined;
 
-    // Parse multipart: iterate parts to get file + trim fields
+    // Parse multipart: iterate parts to get file + trim + aspectRatio fields
     const parts = req.parts();
     for await (const part of parts) {
       if (part.type === 'file' && part.fieldname === 'file') {
@@ -36,13 +37,15 @@ export const directUpload = async (req: FastifyRequest, reply: FastifyReply) => 
         fileBuffer = Buffer.concat(chunks);
         filename = part.filename || 'video.mp4';
       } else if (part.type === 'field') {
-        const str = String((part as any).value ?? '');
+        const str = String((part as any).value ?? '').trim();
         if (part.fieldname === 'trimStart') {
           const n = parseFloat(str);
           if (!isNaN(n)) trimStart = n;
         } else if (part.fieldname === 'trimEnd') {
           const n = parseFloat(str);
           if (!isNaN(n)) trimEnd = n;
+        } else if (part.fieldname === 'aspectRatio' && str) {
+          aspectRatio = str;
         }
       }
     }
@@ -109,6 +112,7 @@ export const directUpload = async (req: FastifyRequest, reply: FastifyReply) => 
       status: 'pending',
       trimStart,
       trimEnd,
+      aspectRatio,
     });
 
     console.log(`✅ Created video entry - ID: ${video._id}, S3 Key: ${cleanKey}`);
@@ -172,7 +176,7 @@ const checkFileContentType = (filePath: string): Promise<boolean> => {
 export const uploadFromUrl = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const userId = (req.user as any).id;
-    const { url, trimStart, trimEnd } = req.body as { url: string; trimStart?: number; trimEnd?: number };
+    const { url, trimStart, trimEnd, aspectRatio } = req.body as { url: string; trimStart?: number; trimEnd?: number; aspectRatio?: string };
 
     if (!url || typeof url !== 'string') {
       return reply.code(400).send({ message: 'Valid URL is required' });
@@ -405,6 +409,7 @@ export const uploadFromUrl = async (req: FastifyRequest, reply: FastifyReply) =>
       status: 'pending',
       trimStart: trimStart,
       trimEnd: trimEnd,
+      aspectRatio: aspectRatio?.trim() || undefined,
     });
 
     console.log(`✅ Created video entry - ID: ${video._id}, S3 Key: ${cleanS3KeyValue}`);
@@ -544,6 +549,10 @@ export const startProcessing = async (req: FastifyRequest, reply: FastifyReply) 
     const normalizedTrimEnd: number | undefined =
       video.trimEnd !== null && video.trimEnd !== undefined ? video.trimEnd : undefined;
 
+    const aspectRatio = (video as any).aspectRatio && String((video as any).aspectRatio).trim()
+      ? String((video as any).aspectRatio).trim()
+      : undefined;
+
     await addVideoJob(
       videoUrl, // Presigned S3 URL
       cleanKey, // S3 key
@@ -551,7 +560,8 @@ export const startProcessing = async (req: FastifyRequest, reply: FastifyReply) 
       videoId,
       video._id.toString(),
       normalizedTrimStart,
-      normalizedTrimEnd
+      normalizedTrimEnd,
+      aspectRatio
     );
 
     video.status = 'processing';

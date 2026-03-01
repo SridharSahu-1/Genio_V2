@@ -46,6 +46,14 @@ import {
 
 gsap.registerPlugin(ScrollTrigger);
 
+const ASPECT_RATIO_OPTIONS = [
+  { value: '', label: 'Original' },
+  { value: '16:9', label: '16:9 (Landscape)' },
+  { value: '9:16', label: '9:16 (Portrait)' },
+  { value: '1:1', label: '1:1 (Square)' },
+  { value: '4:5', label: '4:5' },
+] as const;
+
 interface Video {
   _id: string;
   title: string;
@@ -78,6 +86,7 @@ export default function Dashboard() {
   const [trimStart, setTrimStart] = useState<number>(0);
   const [trimEnd, setTrimEnd] = useState<number>(0);
   const [showTrimOptions, setShowTrimOptions] = useState(false);
+  const [aspectRatio, setAspectRatio] = useState<string>('');
   const videoPreviewRef = useRef<HTMLVideoElement>(null);
   const [playingVideo, setPlayingVideo] = useState<PlaybackData | null>(null);
   const [editingVideo, setEditingVideo] = useState<PlaybackData | null>(null);
@@ -280,6 +289,7 @@ export default function Dashboard() {
           formData.append('trimStart', trimStart.toString());
           formData.append('trimEnd', trimEnd.toString());
         }
+        if (aspectRatio) formData.append('aspectRatio', aspectRatio);
 
         uploadRes = await api.post('/api/videos/upload-direct', formData, {
           headers: {
@@ -316,6 +326,7 @@ export default function Dashboard() {
           uploadData.trimStart = trimStart;
           uploadData.trimEnd = trimEnd;
         }
+        if (aspectRatio) uploadData.aspectRatio = aspectRatio;
         uploadRes = await api.post('/api/videos/upload-url', uploadData);
 
         clearInterval(progressInterval);
@@ -813,6 +824,33 @@ export default function Dashboard() {
                                 className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-purple-500/10"
                               />
                             )}
+                          </div>
+
+                          {/* Aspect ratio when no file selected (file mode) */}
+                          {!file && (
+                            <div className="p-3 bg-slate-800/50 rounded-lg space-y-2">
+                              <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                                <Crop className="w-4 h-4" />
+                                Output aspect ratio
+                              </label>
+                              <p className="text-xs text-slate-500">Output video will be center-cropped to this ratio.</p>
+                              <div className="flex flex-wrap gap-2">
+                                {ASPECT_RATIO_OPTIONS.map((opt) => (
+                                  <Button
+                                    key={opt.value || 'original'}
+                                    type="button"
+                                    variant={aspectRatio === opt.value ? 'default' : 'outline'}
+                                    size="sm"
+                                    className="h-8 text-xs"
+                                    onClick={() => setAspectRatio(opt.value)}
+                                  >
+                                    {opt.label}
+                                  </Button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
                             {file && (
                               <motion.div
                                 initial={{ opacity: 0, y: 10 }}
@@ -982,10 +1020,32 @@ export default function Dashboard() {
                                     </div>
                                   </div>
                                 )}
+
+                                {/* Aspect ratio - output crop (file upload) */}
+                                <div className="p-3 bg-slate-800/50 rounded-lg space-y-2">
+                                  <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                                    <Crop className="w-4 h-4" />
+                                    Output aspect ratio
+                                  </label>
+                                  <p className="text-xs text-slate-500">Output video will be center-cropped to this ratio.</p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {ASPECT_RATIO_OPTIONS.map((opt) => (
+                                      <Button
+                                        key={opt.value || 'original'}
+                                        type="button"
+                                        variant={aspectRatio === opt.value ? 'default' : 'outline'}
+                                        size="sm"
+                                        className="h-8 text-xs"
+                                        onClick={() => setAspectRatio(opt.value)}
+                                      >
+                                        {opt.label}
+                                      </Button>
+                                    ))}
+                                  </div>
+                                </div>
                               </motion.div>
                             )}
                           </div>
-                        </div>
                       ) : (
                         <div className="space-y-4">
                           <div className="space-y-2">
@@ -1058,6 +1118,29 @@ export default function Dashboard() {
                                 </div>
                               </div>
                             )}
+                          </div>
+
+                          {/* Aspect ratio - output crop (URL upload) */}
+                          <div className="p-3 bg-slate-800/50 rounded-lg space-y-2">
+                            <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                              <Crop className="w-4 h-4" />
+                              Output aspect ratio
+                            </label>
+                            <p className="text-xs text-slate-500">Output video will be center-cropped to this ratio.</p>
+                            <div className="flex flex-wrap gap-2">
+                              {ASPECT_RATIO_OPTIONS.map((opt) => (
+                                <Button
+                                  key={opt.value || 'original'}
+                                  type="button"
+                                  variant={aspectRatio === opt.value ? 'default' : 'outline'}
+                                  size="sm"
+                                  className="h-8 text-xs"
+                                  onClick={() => setAspectRatio(opt.value)}
+                                >
+                                  {opt.label}
+                                </Button>
+                              ))}
+                            </div>
                           </div>
                         </div>
                       )}

@@ -129,6 +129,14 @@ if (hasPassword) {
   console.log(`   Check REDIS_PASSWORD or REDIS_URL environment variable.`);
 }
 
+// Enable TLS for Upstash (rediss://) or if REDIS_TLS is set
+if (process.env.REDIS_URL?.startsWith('rediss://') || process.env.REDIS_TLS === 'true' || process.env.REDIS_TLS === '1') {
+  connection.tls = {};
+  console.log('🔒 Using TLS for Redis connection');
+}
+
+console.log(`🔗 Worker connecting to Redis at ${connection.host}:${connection.port}`);
+console.log(`   Queue name: video-processing`);
 // Debug: Log actual connection object (without password)
 console.log(`   Connection config:`, {
   host: connection.host,

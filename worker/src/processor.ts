@@ -40,6 +40,20 @@ const getS3Client = (): S3Client => {
   return s3Client;
 };
 
+// Build FFmpeg crop filter for center-crop to target aspect ratio (e.g. "16:9", "9:16", "1:1")
+// Returns null if aspectRatio is invalid or not set. FFmpeg centers crop by default (x/y = (iw-ow)/2, (ih-oh)/2).
+const buildAspectRatioCropFilter = (aspectRatio: string): string | null => {
+  const match = /^(\d+):(\d+)$/.exec(aspectRatio.trim());
+  if (!match) return null;
+  const num = parseInt(match[1], 10);
+  const den = parseInt(match[2], 10);
+  if (den === 0) return null;
+  // out_w = min(iw, ih*num/den), out_h = min(ih, iw*den/num). Comma in expr must be escaped as \,
+  const ow = `min(iw\\,ih*${num}/${den})`;
+  const oh = `min(ih\\,iw*${den}/${num})`;
+  return `crop=${ow}:${oh}`;
+};
+
 // Log S3 configuration lazily (only when first used)
 let configLogged = false;
 const logS3Config = () => {
@@ -83,6 +97,7 @@ export const processVideo = async (job: Job) => {
   const videoId = jobData?.videoId;
   const trimStart = jobData?.trimStart;
   const trimEnd = jobData?.trimEnd;
+  const aspectRatio = typeof jobData?.aspectRatio === 'string' && jobData.aspectRatio.trim() ? jobData.aspectRatio.trim() : undefined;
 
   // videoUrl is optional now - we use direct S3 download with videoKey
   // But we'll log it for reference if provided
@@ -618,12 +633,16 @@ export const processVideo = async (job: Job) => {
           const assFilePath = path.join(tempDir, assFiles[0]);
           const outputVideoPath = path.join(tempDir, `output_${docId || videoId || Date.now()}.mp4`);
           
-          // Build ffmpeg command: scale output to 720p then burn subtitles
+          // Build ffmpeg command: optional center-crop to aspect ratio, then scale to 720p, then burn subtitles
           // scale=-2:720 keeps aspect ratio (width divisible by 2 for encoder)
           const escapedAss = assFilePath.replace(/:/g, '\\:').replace(/'/g, "\\'");
+          const cropFilter = aspectRatio ? buildAspectRatioCropFilter(aspectRatio) : null;
           const scaleFilter = 'scale=-2:720';
           const subtitlesFilter = `subtitles=${escapedAss}:force_style='FontSize=24,PrimaryColour=&Hffffff,OutlineColour=&H000000,Outline=2'`;
-          const vf = `${scaleFilter},${subtitlesFilter}`;
+          const vf = cropFilter ? `${cropFilter},${scaleFilter},${subtitlesFilter}` : `${scaleFilter},${subtitlesFilter}`;
+          if (cropFilter) {
+            console.log(`📐 Applying aspect ratio crop: ${aspectRatio} -> filter: ${cropFilter}`);
+          }
           const ffmpegArgs: string[] = [
             '-i', localVideoPath,
             '-vf', vf,

@@ -1,8 +1,10 @@
+// Load .env before any other imports so queue/Redis config is available at module load time
+import 'dotenv/config';
+
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
 import multipart from '@fastify/multipart';
-import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import Redis from 'ioredis';
 import { connectDB } from './config/db';
@@ -11,8 +13,6 @@ import videoRoutes from './routes/videoRoutes';
 import { initSocket } from './services/socketService';
 import { setupQueueListeners } from './services/queueListener';
 import { ensureBucketExists } from './services/s3Service';
-
-dotenv.config();
 
 const app = Fastify({ logger: true });
 

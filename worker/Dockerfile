@@ -9,14 +9,18 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Upgrade pip and install Python dependencies in one layer for better caching
-RUN pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir \
-    torch==2.1.2 \
-    torchvision==0.16.2 \
-    torchaudio==2.1.2 \
-    --index-url https://download.pytorch.org/whl/cpu && \
-    pip install --no-cache-dir git+https://github.com/m-bain/whisperx.git
+# Upgrade pip and install Python dependencies (split layers for clearer errors and cache)
+ENV PIP_DEFAULT_TIMEOUT=300
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Install PyTorch CPU first (WhisperX 3.x requires torch~=2.8)
+RUN pip install --no-cache-dir \
+    torch==2.8.0 \
+    torchaudio==2.8.0 \
+    --index-url https://download.pytorch.org/whl/cpu
+
+# Install WhisperX from PyPI (more reliable than git; matches torch 2.8)
+RUN pip install --no-cache-dir whisperx
 
 # Install Node dependencies first (better caching)
 # Install ALL dependencies (including dev dependencies for building)

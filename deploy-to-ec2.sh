@@ -90,6 +90,26 @@ fi
 echo -e "${GREEN}✅ SSH connection ready${NC}"
 echo ""
 
+# Step 1.5: Free disk space on EC2 to avoid "No space left on device"
+echo -e "${YELLOW}🧹 Step 1.5/5: Freeing disk space on EC2...${NC}"
+ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$INSTANCE_IP" << 'FREESPACE'
+set -e
+echo "   Checking disk space before cleanup..."
+df -h /home 2>/dev/null || df -h ~ 2>/dev/null || true
+echo "   Removing old deploy archive if present..."
+rm -f /tmp/genio-deploy.tar.gz 2>/dev/null || true
+echo "   Pruning Docker (images, containers, build cache)..."
+docker system prune -af 2>/dev/null || true
+docker builder prune -af 2>/dev/null || true
+echo "   Cleaning Docker volumes (unused only)..."
+docker volume prune -f 2>/dev/null || true
+echo "   Checking disk space after cleanup..."
+df -h /home 2>/dev/null || df -h ~ 2>/dev/null || true
+echo "   ✅ Disk cleanup done"
+FREESPACE
+echo -e "${GREEN}✅ Disk space ready${NC}"
+echo ""
+
 # Step 2: Upload Server and Worker code
 echo -e "${YELLOW}📤 Step 2/5: Uploading Server and Worker code...${NC}"
 echo -e "${CYAN}   Uploading: server/, worker/, docker-compose.prod.yml, server/Dockerfile${NC}"
@@ -134,7 +154,8 @@ rsync -avz --progress \
     
     # Alternative: Use tar + ssh for more reliable transfer
     echo -e "${CYAN}   Creating archive (excluding large files)...${NC}"
-    tar --exclude='.git' \
+    # COPYFILE_DISABLE=1 avoids macOS ._* resource fork files (saves space, cleaner extract)
+    COPYFILE_DISABLE=1 tar --exclude='.git' \
         --exclude='node_modules' \
         --exclude='venv' \
         --exclude='__pycache__' \
@@ -177,8 +198,56 @@ EXTRACT
     echo -e "${GREEN}✅ Code uploaded using alternative method${NC}"
 }
 
+# Verify upload: critical files must exist on EC2
+echo -e "${CYAN}   Verifying upload on EC2...${NC}"
+VERIFY_MSG=$(ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$INSTANCE_IP" "
+    cd ~/Genio_V2 2>/dev/null || { echo 'DIR_MISSING'; exit 1; }
+    if [ ! -f server/Dockerfile ]; then echo 'DOCKERFILE_MISSING'; exit 1; fi
+    if [ ! -f server/package.json ]; then echo 'PACKAGE_JSON_MISSING'; exit 1; fi
+    if [ ! -f worker/Dockerfile ]; then echo 'WORKER_DOCKERFILE_MISSING'; exit 1; fi
+    if [ ! -f docker-compose.prod.yml ]; then echo 'COMPOSE_MISSING'; exit 1; fi
+    echo 'OK'
+" 2>/dev/null || echo "VERIFY_FAILED")
+
+case "$VERIFY_MSG" in
+    OK) ;;
+    DIR_MISSING)
+        echo -e "${RED}❌ Upload verification failed: ~/Genio_V2 not found on EC2${NC}"
+        exit 1
+        ;;
+    DOCKERFILE_MISSING)
+        echo -e "${RED}❌ Upload verification failed: server/Dockerfile missing on EC2 (disk full?)${NC}"
+        echo -e "${YELLOW}   Free space on EC2 and run this script again.${NC}"
+        exit 1
+        ;;
+    PACKAGE_JSON_MISSING)
+        echo -e "${RED}❌ Upload verification failed: server/package.json missing on EC2${NC}"
+        exit 1
+        ;;
+    WORKER_DOCKERFILE_MISSING)
+        echo -e "${RED}❌ Upload verification failed: worker/Dockerfile missing on EC2${NC}"
+        exit 1
+        ;;
+    COMPOSE_MISSING)
+        echo -e "${RED}❌ Upload verification failed: docker-compose.prod.yml missing on EC2${NC}"
+        exit 1
+        ;;
+    *)
+        echo -e "${RED}❌ Upload verification failed: $VERIFY_MSG${NC}"
+        exit 1
+        ;;
+esac
 echo -e "${GREEN}✅ Code uploaded successfully${NC}"
 echo ""
+
+# Step 2.5: Upload local .env.production if present (so updated env is used)
+if [ -f .env.production ]; then
+    echo -e "${YELLOW}📄 Uploading local .env.production to EC2...${NC}"
+    scp -i "$KEY_FILE" -o StrictHostKeyChecking=no .env.production "$SSH_USER@$INSTANCE_IP:~/Genio_V2/.env.production" && \
+        echo -e "${GREEN}✅ .env.production uploaded (will be used by containers)${NC}" || \
+        echo -e "${YELLOW}⚠️  Could not upload .env.production; EC2 will use/create its own${NC}"
+    echo ""
+fi
 
 # Step 3: Deploy and Start Services
 echo -e "${YELLOW}🚀 Step 3/5: Deploying Server and Worker on EC2...${NC}"
@@ -237,18 +306,20 @@ else
     echo "   ✅ Docker Buildx already available"
 fi
 
-# Create .env.production if it doesn't exist
-if [ ! -f .env.production ]; then
+# Use existing .env.production if present (e.g. uploaded from local); otherwise create template
+if [ -f .env.production ]; then
+    echo "📝 Using existing .env.production on EC2"
+else
     echo "📝 Creating .env.production template..."
     cat > .env.production << 'ENVEOF'
 NODE_ENV=production
 PORT=5001
-MONGO_URI=mongodb+srv://sridharsahu5555_db_user:Genio%40123@cluster0.47pfntx.mongodb.net/genio?appName=Cluster0
+MONGO_URI=mongodb+srv://YOUR_MONGO_USER:YOUR_MONGO_PASSWORD@cluster0.xxxxx.mongodb.net/genio?retryWrites=true&w=majority
 JWT_SECRET=change-this-to-a-random-secret-key
 REDIS_HOST=accepted-wallaby-28584.upstash.io
 REDIS_PORT=6379
 REDIS_USERNAME=default
-REDIS_PASSWORD=AW-oAAIncDE4MmJlOWE0ZWFkOTQ0ZDQ0YmYxYjNkNDdkYzZkNzliMXAxMjg1ODQ
+REDIS_PASSWORD=YOUR_UPSTASH_REDIS_PASSWORD
 REDIS_TLS=true
 AWS_ACCESS_KEY_ID=YOUR_AWS_ACCESS_KEY_ID
 AWS_SECRET_ACCESS_KEY=YOUR_AWS_SECRET_ACCESS_KEY
@@ -308,62 +379,53 @@ services:
     image: genio_v2_worker:latest
 COMPOSE_EOF
 
-# Create/Update .env.production file
-echo "📝 Creating/updating .env.production file..."
-
-# Generate a secure JWT_SECRET if not already set
-if [ -f .env.production ] && grep -q "^JWT_SECRET=" .env.production && ! grep -q "JWT_SECRET=change-this" .env.production; then
-    # Keep existing JWT_SECRET
-    JWT_SECRET=\$(grep "^JWT_SECRET=" .env.production | cut -d'=' -f2-)
-    echo "   Using existing JWT_SECRET"
+# Create/Update .env.production only if we did not upload one (file was created by template above)
+if [ -f .env.production ] && ! grep -q "JWT_SECRET=change-this" .env.production 2>/dev/null; then
+    echo "📝 Using existing .env.production (uploaded or already configured)"
 else
-    # Generate new JWT_SECRET
-    JWT_SECRET=\$(openssl rand -base64 32 2>/dev/null || echo "genio-secret-\$(date +%s)-\$RANDOM")
-    echo "   Generated new JWT_SECRET"
-fi
+    echo "📝 Creating/updating .env.production file..."
 
-# Create/Update .env.production file (preserve existing AWS credentials if they're real)
-if [ -f .env.production ]; then
-    # Check if AWS credentials are already set and not placeholders
-    EXISTING_AWS_KEY=\$(grep "^AWS_ACCESS_KEY_ID=" .env.production | cut -d'=' -f2- || echo "")
-    EXISTING_AWS_SECRET=\$(grep "^AWS_SECRET_ACCESS_KEY=" .env.production | cut -d'=' -f2- || echo "")
-    
-    # If credentials exist and are not placeholders, preserve them
+    # Generate a secure JWT_SECRET if not already set
+    if [ -f .env.production ] && grep -q "^JWT_SECRET=" .env.production && ! grep -q "JWT_SECRET=change-this" .env.production; then
+        JWT_SECRET=\$(grep "^JWT_SECRET=" .env.production | cut -d'=' -f2-)
+        echo "   Using existing JWT_SECRET"
+    else
+        JWT_SECRET=\$(openssl rand -base64 32 2>/dev/null || echo "genio-secret-\$(date +%s)-\$RANDOM")
+        echo "   Generated new JWT_SECRET"
+    fi
+
+    EXISTING_AWS_KEY=\$(grep "^AWS_ACCESS_KEY_ID=" .env.production 2>/dev/null | cut -d'=' -f2- || echo "")
+    EXISTING_AWS_SECRET=\$(grep "^AWS_SECRET_ACCESS_KEY=" .env.production 2>/dev/null | cut -d'=' -f2- || echo "")
     if [[ "\$EXISTING_AWS_KEY" != "" ]] && [[ "\$EXISTING_AWS_KEY" != *"YOUR_AWS"* ]] && [[ "\$EXISTING_AWS_KEY" != *"your"* ]]; then
-        echo "   ✅ Preserving existing AWS credentials"
         USE_EXISTING_AWS=true
     else
         USE_EXISTING_AWS=false
     fi
-else
-    USE_EXISTING_AWS=false
+
+    {
+        echo "NODE_ENV=production"
+        echo "PORT=5001"
+        echo "MONGO_URI=mongodb+srv://YOUR_MONGO_USER:YOUR_MONGO_PASSWORD@cluster0.xxxxx.mongodb.net/genio?retryWrites=true&w=majority"
+        echo "JWT_SECRET=\${JWT_SECRET}"
+        echo "REDIS_HOST=accepted-wallaby-28584.upstash.io"
+        echo "REDIS_PORT=6379"
+        echo "REDIS_USERNAME=default"
+        echo "REDIS_PASSWORD=YOUR_UPSTASH_REDIS_PASSWORD"
+        echo "REDIS_TLS=true"
+        if [ "\$USE_EXISTING_AWS" = "true" ]; then
+            echo "AWS_ACCESS_KEY_ID=\${EXISTING_AWS_KEY}"
+            echo "AWS_SECRET_ACCESS_KEY=\${EXISTING_AWS_SECRET}"
+        else
+            echo "AWS_ACCESS_KEY_ID=YOUR_AWS_ACCESS_KEY_ID"
+            echo "AWS_SECRET_ACCESS_KEY=YOUR_AWS_SECRET_ACCESS_KEY"
+        fi
+        echo "AWS_S3_BUCKET=genio-videos"
+        echo "AWS_REGION=us-east-1"
+        echo "CORS_ORIGINS=*"
+        echo "HF_TOKEN=your_huggingface_token"
+    } > .env.production
+    echo "   ✅ .env.production file created"
 fi
-
-# Create .env.production file
-{
-    echo "NODE_ENV=production"
-    echo "PORT=5001"
-    echo "MONGO_URI=mongodb+srv://sridharsahu5555_db_user:Genio%40123@cluster0.47pfntx.mongodb.net/genio?appName=Cluster0"
-    echo "JWT_SECRET=\${JWT_SECRET}"
-    echo "REDIS_HOST=accepted-wallaby-28584.upstash.io"
-    echo "REDIS_PORT=6379"
-    echo "REDIS_USERNAME=default"
-    echo "REDIS_PASSWORD=AW-oAAIncDE4MmJlOWE0ZWFkOTQ0ZDQ0YmYxYjNkNDdkYzZkNzliMXAxMjg1ODQ"
-    echo "REDIS_TLS=true"
-    if [ "\$USE_EXISTING_AWS" = "true" ]; then
-        echo "AWS_ACCESS_KEY_ID=\${EXISTING_AWS_KEY}"
-        echo "AWS_SECRET_ACCESS_KEY=\${EXISTING_AWS_SECRET}"
-    else
-        echo "AWS_ACCESS_KEY_ID=YOUR_AWS_ACCESS_KEY_ID"
-        echo "AWS_SECRET_ACCESS_KEY=YOUR_AWS_SECRET_ACCESS_KEY"
-    fi
-    echo "AWS_S3_BUCKET=genio-videos"
-    echo "AWS_REGION=us-east-1"
-    echo "CORS_ORIGINS=*"
-    echo "HF_TOKEN=your_huggingface_token"
-} > .env.production
-
-echo "   ✅ .env.production file created"
 echo "   📋 Verifying environment variables..."
 if [ -f .env.production ]; then
     echo "   ✅ File exists"
@@ -406,8 +468,21 @@ echo ""
 echo -e "${YELLOW}🔍 Step 4/5: Verifying services...${NC}"
 sleep 5
 
+# Re-send Instance Connect key so verification SSH works (temp key may have expired)
+AZ=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query "Reservations[*].Instances[*].Placement.AvailabilityZone" --output text --region "$REGION" 2>/dev/null || true)
+if [ -n "$AZ" ]; then
+    PUBLIC_KEY=$(ssh-keygen -y -f "$KEY_FILE" 2>/dev/null || true)
+    if [ -n "$PUBLIC_KEY" ]; then
+        aws ec2-instance-connect send-ssh-public-key --instance-id "$INSTANCE_ID" --availability-zone "$AZ" --instance-os-user "$SSH_USER" --ssh-public-key "$PUBLIC_KEY" --region "$REGION" >/dev/null 2>&1 || true
+        sleep 2
+    fi
+fi
+
+# Use IdentitiesOnly=yes so only our PEM is used (avoids "Permission denied" from other keys)
+SSH_OPTS=(-i "$KEY_FILE" -o StrictHostKeyChecking=no -o IdentitiesOnly=yes)
+
 # Check if server is responding
-HEALTH_CHECK=$(ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$INSTANCE_IP" \
+HEALTH_CHECK=$(ssh "${SSH_OPTS[@]}" "$SSH_USER@$INSTANCE_IP" \
   "curl -s -o /dev/null -w '%{http_code}' http://localhost:$SERVER_PORT/health || echo '000'" 2>/dev/null || echo "000")
 
 if [ "$HEALTH_CHECK" = "200" ]; then
@@ -418,8 +493,8 @@ else
 fi
 
 # Check containers
-CONTAINER_STATUS=$(ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$INSTANCE_IP" \
-  "cd ~/Genio_V2 && (docker-compose -f docker-compose.prod.yml ps 2>/dev/null || docker compose -f docker-compose.prod.yml ps 2>/dev/null) | grep -c 'Up' || echo '0'")
+CONTAINER_STATUS=$(ssh "${SSH_OPTS[@]}" "$SSH_USER@$INSTANCE_IP" \
+  "cd ~/Genio_V2 && (docker-compose -f docker-compose.prod.yml ps 2>/dev/null || docker compose -f docker-compose.prod.yml ps 2>/dev/null) | grep -c 'Up' || echo '0'" 2>/dev/null || echo "0")
 
 echo -e "${GREEN}✅ Containers running: $CONTAINER_STATUS${NC}"
 echo ""
@@ -431,20 +506,23 @@ echo -e "${BLUE}╔════════════════════�
 echo -e "${BLUE}║                    API ENDPOINT                        ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "${GREEN}📍 Server API Endpoint:${NC}"
-echo -e "   ${CYAN}http://$INSTANCE_IP:$SERVER_PORT${NC}"
+echo -e "${GREEN}📍 Server (on EC2):${NC}"
+echo -e "   ${CYAN}http://$INSTANCE_IP:$SERVER_PORT${NC} (use Cloudflare Tunnel for HTTPS)"
 echo ""
-echo -e "${GREEN}🔗 Available Endpoints:${NC}"
-echo -e "   ${CYAN}Health Check:${NC} http://$INSTANCE_IP:$SERVER_PORT/health"
-echo -e "   ${CYAN}API Base:${NC}     http://$INSTANCE_IP:$SERVER_PORT/api"
+echo -e "${GREEN}🔗 Stable URL for client:${NC}"
+echo -e "   Use a named Cloudflare Tunnel (one-time setup) so the API URL never changes."
+echo -e "   Then you do not need to redeploy the client when you push server/worker changes."
+echo -e "   See ${CYAN}DEPLOYMENT.md${NC} for setup."
+echo ""
+echo -e "${GREEN}🔗 Health / API:${NC}"
+echo -e "   ${CYAN}Health:${NC} http://$INSTANCE_IP:$SERVER_PORT/health"
+echo -e "   ${CYAN}API:${NC}    http://$INSTANCE_IP:$SERVER_PORT/api"
 echo ""
 echo -e "${YELLOW}⚠️  Important:${NC}"
-echo -e "   1. Make sure EC2 Security Group allows inbound traffic on port $SERVER_PORT"
-echo -e "   2. Update .env.production on EC2 with your actual credentials:"
-echo -e "      ${CYAN}ssh -i $KEY_FILE $SSH_USER@$INSTANCE_IP${NC}"
-echo -e "      ${CYAN}cd ~/Genio_V2 && nano .env.production${NC}"
-echo -e "   3. After updating .env.production, restart services:"
-echo -e "      ${CYAN}docker-compose -f docker-compose.prod.yml restart${NC}"
+echo -e "   1. For HTTPS and a stable URL: set up a named tunnel once (DEPLOYMENT.md)."
+echo -e "   2. To use updated env: put .env.production in project root and re-run deploy; or on EC2:"
+echo -e "      ${CYAN}cd ~/Genio_V2 && nano .env.production${NC} then restart:"
+echo -e "      ${CYAN}docker-compose -f docker-compose.prod.yml -f docker-compose.override.yml --env-file .env.production up -d${NC}"
 echo ""
 echo -e "${BLUE}📋 Useful Commands:${NC}"
 echo -e "   ${CYAN}View logs:${NC}     docker-compose -f docker-compose.prod.yml logs -f"

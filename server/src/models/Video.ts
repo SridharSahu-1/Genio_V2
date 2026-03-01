@@ -14,6 +14,7 @@ const videoSchema = new mongoose.Schema({
   progress: { type: Number, default: 0 },
   trimStart: { type: Number }, // Trim start time in seconds
   trimEnd: { type: Number }, // Trim end time in seconds
+  aspectRatio: { type: String }, // Output aspect ratio e.g. "16:9", "9:16", "1:1", "4:5" – crop applied in video
 }, { timestamps: true });
 
 // Generate docId before saving if not present
