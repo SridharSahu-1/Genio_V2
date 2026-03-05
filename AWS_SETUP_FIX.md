@@ -48,11 +48,11 @@ aws_access_key_id = foo
 aws_secret_access_key = bar
 ```
 
-To:
+To (use placeholder values, never real keys in files):
 ```
 [default]
-aws_access_key_id = YOUR_AWS_ACCESS_KEY
-aws_secret_access_key = YOUR_AWS_ACCESS_KEY
+aws_access_key_id = YOUR_AWS_ACCESS_KEY_ID
+aws_secret_access_key = YOUR_AWS_SECRET_ACCESS_KEY
 ```
 
 **Note**: This makes `genio` the default profile for all AWS CLI commands.
