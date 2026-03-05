@@ -15,31 +15,65 @@ const initUploadSchema = z.object({
   hfToken: z.string().optional(), // In production, store this securely or per user
 });
 
-// DIRECT UPLOAD - Upload directly to S3
+// DIRECT UPLOAD - Upload directly to S3 (with optional trim; worker trims and scales output)
 export const directUpload = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const userId = (req.user as any).id;
-    const data = await req.file();
+    let fileBuffer: Buffer | null = null;
+    let filename = '';
+    let trimStart: number | undefined;
+    let trimEnd: number | undefined;
+    let aspectRatio: string | undefined;
+    let subtitleLanguage: string | undefined;
 
-    if (!data) {
-      return reply.code(400).send({ message: 'No file provided' });
+    // Parse multipart: iterate parts to get file + trim + aspectRatio fields
+    const parts = req.parts();
+    for await (const part of parts) {
+      if (part.type === 'file' && part.fieldname === 'file') {
+        const chunks: Buffer[] = [];
+        const fileStream: NodeJS.ReadableStream = part.file as any;
+        for await (const chunk of fileStream) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        fileBuffer = Buffer.concat(chunks);
+        filename = part.filename || 'video.mp4';
+      } else if (part.type === 'field') {
+        const str = String((part as any).value ?? '').trim();
+        if (part.fieldname === 'trimStart') {
+          const n = parseFloat(str);
+          if (!isNaN(n)) trimStart = n;
+        } else if (part.fieldname === 'trimEnd') {
+          const n = parseFloat(str);
+          if (!isNaN(n)) trimEnd = n;
+        } else if (part.fieldname === 'aspectRatio' && str) {
+          aspectRatio = str;
+        } else if (part.fieldname === 'subtitleLanguage' && str) {
+          const normalized = str.toLowerCase();
+          if (normalized !== 'auto') {
+            subtitleLanguage = str;
+          }
+        }
+      }
     }
 
-    const filename = data.filename;
+    if (!fileBuffer || fileBuffer.length === 0) {
+      return reply.code(400).send({ message: 'No file provided or file is empty' });
+    }
+
     const sanitizedFilename = filename
       .replace(/[<>:"|?*]/g, '_')
       .replace(/\s+/g, '_')
       .replace(/\/+/g, '_');
 
-    // Generate S3 key
     const s3Key = `uploads/${userId}/${Date.now()}-${sanitizedFilename}`;
     const cleanKey = cleanS3Key(s3Key);
 
     console.log(`📤 Uploading file directly to S3: ${filename}`);
     console.log(`   S3 Key: ${cleanKey}`);
-    console.log(`   User ID: ${userId}`);
+    if (trimStart != null || trimEnd != null) {
+      console.log(`   Trim: ${trimStart ?? 0}s - ${trimEnd ?? 'end'}s`);
+    }
 
-    // Initialize S3 client
     const accessKey = process.env.AWS_ACCESS_KEY_ID || '';
     const secretKey = process.env.AWS_SECRET_ACCESS_KEY || '';
     const region = process.env.AWS_REGION || 'us-east-1';
@@ -57,21 +91,6 @@ export const directUpload = async (req: FastifyRequest, reply: FastifyReply) => 
       },
     });
 
-    // Read file stream into buffer
-    const chunks: Buffer[] = [];
-    const fileStream: NodeJS.ReadableStream = data.file as any;
-
-    for await (const chunk of fileStream) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-
-    const fileBuffer = Buffer.concat(chunks);
-
-    if (fileBuffer.length === 0) {
-      return reply.code(400).send({ message: 'File is empty' });
-    }
-
-    // Detect content type from file extension
     const ext = path.extname(sanitizedFilename).toLowerCase();
     const contentTypeMap: Record<string, string> = {
       '.mp4': 'video/mp4',
@@ -82,7 +101,6 @@ export const directUpload = async (req: FastifyRequest, reply: FastifyReply) => 
     };
     const contentType = contentTypeMap[ext] || 'video/mp4';
 
-    // Upload to S3
     await s3Client.send(new PutObjectCommand({
       Bucket: bucket,
       Key: cleanKey,
@@ -92,13 +110,16 @@ export const directUpload = async (req: FastifyRequest, reply: FastifyReply) => 
 
     console.log(`✅ File uploaded to S3: ${cleanKey} (${fileBuffer.length} bytes)`);
 
-    // Create video entry
     const video = await Video.create({
       user: userId,
       title: filename,
       originalKey: cleanKey,
       s3Key: cleanKey,
       status: 'pending',
+      trimStart,
+      trimEnd,
+      aspectRatio,
+      subtitleLanguage,
     });
 
     console.log(`✅ Created video entry - ID: ${video._id}, S3 Key: ${cleanKey}`);
@@ -162,7 +183,13 @@ const checkFileContentType = (filePath: string): Promise<boolean> => {
 export const uploadFromUrl = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const userId = (req.user as any).id;
-    const { url } = req.body as { url: string };
+    const { url, trimStart, trimEnd, aspectRatio, subtitleLanguage } = req.body as {
+      url: string;
+      trimStart?: number;
+      trimEnd?: number;
+      aspectRatio?: string;
+      subtitleLanguage?: string;
+    };
 
     if (!url || typeof url !== 'string') {
       return reply.code(400).send({ message: 'Valid URL is required' });
@@ -393,6 +420,13 @@ export const uploadFromUrl = async (req: FastifyRequest, reply: FastifyReply) =>
       originalKey: cleanS3KeyValue,
       s3Key: cleanS3KeyValue,
       status: 'pending',
+      trimStart: trimStart,
+      trimEnd: trimEnd,
+      aspectRatio: aspectRatio?.trim() || undefined,
+      subtitleLanguage:
+        subtitleLanguage && subtitleLanguage.trim().toLowerCase() !== 'auto'
+          ? subtitleLanguage.trim()
+          : undefined,
     });
 
     console.log(`✅ Created video entry - ID: ${video._id}, S3 Key: ${cleanS3KeyValue}`);
@@ -475,7 +509,11 @@ export const initUpload = async (req: FastifyRequest, reply: FastifyReply) => {
 
 export const startProcessing = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const { videoId, hfToken } = req.body as { videoId: string, hfToken?: string };
+    const { videoId, hfToken, subtitleLanguage } = req.body as {
+      videoId: string;
+      hfToken?: string;
+      subtitleLanguage?: string;
+    };
     const video = await Video.findById(videoId);
 
     if (!video) return reply.code(404).send({ message: 'Video not found' });
@@ -526,15 +564,43 @@ export const startProcessing = async (req: FastifyRequest, reply: FastifyReply) 
     console.log(`Doc ID: ${video._id}`);
     console.log('======================================================================');
 
+    // Normalize trim values so we never pass null to addVideoJob
+    const normalizedTrimStart: number | undefined =
+      video.trimStart !== null && video.trimStart !== undefined ? video.trimStart : undefined;
+    const normalizedTrimEnd: number | undefined =
+      video.trimEnd !== null && video.trimEnd !== undefined ? video.trimEnd : undefined;
+
+    const aspectRatio =
+      (video as any).aspectRatio && String((video as any).aspectRatio).trim()
+        ? String((video as any).aspectRatio).trim()
+        : undefined;
+
+    const normalizedSubtitleLanguageFromBody =
+      subtitleLanguage && subtitleLanguage.trim().toLowerCase() !== 'auto'
+        ? subtitleLanguage.trim()
+        : undefined;
+    const normalizedSubtitleLanguageFromVideo =
+      (video as any).subtitleLanguage && String((video as any).subtitleLanguage).trim()
+        ? String((video as any).subtitleLanguage).trim()
+        : undefined;
+    const finalSubtitleLanguage = normalizedSubtitleLanguageFromBody || normalizedSubtitleLanguageFromVideo;
+
     await addVideoJob(
       videoUrl, // Presigned S3 URL
       cleanKey, // S3 key
       hfToken || '',
       videoId,
-      video._id.toString()
+      video._id.toString(),
+      normalizedTrimStart,
+      normalizedTrimEnd,
+      aspectRatio,
+      finalSubtitleLanguage
     );
 
     video.status = 'processing';
+    if (finalSubtitleLanguage) {
+      (video as any).subtitleLanguage = finalSubtitleLanguage;
+    }
     await video.save();
 
     console.log(`✅ Processing started for video ${videoId}`);
@@ -646,17 +712,18 @@ export const getVideoPlaybackUrl = async (req: FastifyRequest, reply: FastifyRep
     console.log(`   Full video object:`, JSON.stringify({
       _id: video._id,
       subtitleS3Key: video.subtitleS3Key,
+      outputS3Key: video.outputS3Key,
       status: video.status,
       s3Key: video.s3Key,
       originalKey: video.originalKey
     }, null, 2));
 
-    // Generate presigned URL for S3 video
-    const videoS3Key = video.s3Key || video.originalKey;
+    // Use processed output video (with burned-in subtitles) if available, otherwise original
+    const videoS3Key = video.outputS3Key || video.s3Key || video.originalKey;
     let videoUrl: string;
     try {
       videoUrl = await getPresignedUrl(videoS3Key, 3600); // 1 hour expiry
-      console.log(`✅ Generated presigned URL for video: ${videoS3Key}`);
+      console.log(`✅ Generated presigned URL for video: ${videoS3Key} ${video.outputS3Key ? '(output video)' : '(original video)'}`);
     } catch (error: any) {
       console.error(`❌ Failed to generate presigned URL for video: ${error.message}`);
       return reply.code(500).send({ message: 'Failed to generate video URL' });

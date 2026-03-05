@@ -64,13 +64,13 @@ export default function Home() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
-            className="text-5xl md:text-7xl font-bold mb-6 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400"
+            className="text-3xl sm:text-4xl md:text-5xl lg:text-7xl font-bold mb-4 sm:mb-6 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 px-4"
           >
             Transform Videos with
             <br />
-            <span className="inline-flex items-center gap-3">
+            <span className="inline-flex items-center gap-2 sm:gap-3">
               AI-Powered
-              <Sparkles className="w-12 h-12 md:w-16 md:h-16 text-purple-400 animate-pulse" />
+              <Sparkles className="w-8 h-8 sm:w-12 sm:h-12 md:w-16 md:h-16 text-purple-400 animate-pulse" />
             </span>
             <br />
             Subtitles
@@ -80,10 +80,11 @@ export default function Home() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.4 }}
-            className="text-xl md:text-2xl text-slate-300 mb-12 max-w-2xl mx-auto leading-relaxed"
+            className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-300 mb-8 sm:mb-12 max-w-2xl mx-auto leading-relaxed px-4"
           >
             Professional video editing, automatic subtitle generation, and seamless workflow.
-            <br />
+            <br className="hidden sm:block" />
+            <span className="sm:hidden"> </span>
             All powered by cutting-edge AI technology.
           </motion.p>
 

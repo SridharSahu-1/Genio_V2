@@ -24,11 +24,11 @@
         },
         {
           "name": "REDIS_PASSWORD",
-          "value": "AW-oAAIncDE4MmJlOWE0ZWFkOTQ0ZDQ0YmYxYjNkNDdkYzZkNzliMXAxMjg1ODQ"
+          "value": "YOUR_UPSTASH_REDIS_PASSWORD"
         },
         {
           "name": "AWS_ACCESS_KEY_ID",
-          "value": "AKIAQMLJCG7QOGUGS6DI"
+          "value": "YOUR_AWS_ACCESS_KEY_ID"
         },
         {
           "name": "AWS_SECRET_ACCESS_KEY",

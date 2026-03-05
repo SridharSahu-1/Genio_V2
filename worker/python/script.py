@@ -156,7 +156,7 @@ def download_from_url(url: str, output_path: str):
         sys.stdout.flush()
         raise
 
-def process_video_diarization(input_file_or_url, hf_token, output_dir, output_path=None):
+def process_video_diarization(input_file_or_url, hf_token, output_dir, output_path=None, forced_language=None):
     # Log output directory at start
     print(f"📁 Output directory: {output_dir}")
     print(f"📁 Output directory absolute path: {os.path.abspath(output_dir)}")
@@ -230,7 +230,11 @@ def process_video_diarization(input_file_or_url, hf_token, output_dir, output_pa
             print(f"Starting transcription with OpenAI Whisper...")
             sys.stdout.flush()
             # Use OpenAI whisper transcribe - this doesn't use faster-whisper
-            result = whisper_model.transcribe(audio, task="transcribe", language=None)
+            result = whisper_model.transcribe(
+                audio,
+                task="transcribe",
+                language=forced_language if forced_language else None,
+            )
             print(f"✅ Transcription completed")
             sys.stdout.flush()
             
@@ -238,8 +242,10 @@ def process_video_diarization(input_file_or_url, hf_token, output_dir, output_pa
             if "segments" not in result:
                 raise ValueError("Transcription failed: unexpected result format")
             
-            # Ensure result has language field
-            if "language" not in result:
+            # Ensure result has language field and respect user override
+            if forced_language:
+                result["language"] = forced_language
+            elif "language" not in result:
                 result["language"] = result.get("language", "en")
             
             # Clean up
@@ -300,7 +306,12 @@ def process_video_diarization(input_file_or_url, hf_token, output_dir, output_pa
         print(f"Starting transcription with batch_size=1...")
         sys.stdout.flush()
         try:
-            result = model.transcribe(audio, batch_size=1, task="transcribe")
+            result = model.transcribe(
+                audio,
+                batch_size=1,
+                task="transcribe",
+                language=forced_language if forced_language else None,
+            )
             print(f"✅ Transcription completed")
             sys.stdout.flush()
         except Exception as e:
@@ -315,8 +326,11 @@ def process_video_diarization(input_file_or_url, hf_token, output_dir, output_pa
         if device == "cuda":
             torch.cuda.empty_cache()
     
-    detected_lang = result["language"]
-    print(f"Detected Language: {detected_lang}")
+    detected_lang = forced_language or result.get("language", "en")
+    if forced_language:
+        print(f"Using user-selected language: {forced_language} (model detected: {result.get('language')})")
+    else:
+        print(f"Detected Language: {detected_lang}")
     sys.stdout.flush()
 
     # 2. Align
@@ -392,10 +406,11 @@ if __name__ == "__main__":
     parser.add_argument("--output_path", help="Path to save downloaded file (required if using --input_url)")
     parser.add_argument("--token", required=True)
     parser.add_argument("--output_dir", required=True)
+    parser.add_argument("--language", help="Force subtitle language code (e.g. en, hi, es)", default=None)
     args = parser.parse_args()
     
     # Use URL if provided, otherwise use local input
     input_source = args.input_url if args.input_url else args.input
-    process_video_diarization(input_source, args.token, args.output_dir, args.output_path)
+    process_video_diarization(input_source, args.token, args.output_dir, args.output_path, args.language)
 
 

@@ -46,6 +46,12 @@ const getRedisConnection = () => {
     connection.password = process.env.REDIS_PASSWORD;
   }
 
+  // Enable TLS for Upstash (rediss://) or if REDIS_TLS is set
+  if (process.env.REDIS_URL?.startsWith('rediss://') || process.env.REDIS_TLS === 'true' || process.env.REDIS_TLS === '1') {
+    connection.tls = {};
+    console.log('🔒 Using TLS for Redis connection');
+  }
+
   return connection;
 };
 
@@ -121,6 +127,9 @@ export const setupQueueListeners = () => {
       subtitleS3Key = result?.subtitleS3Key;
     }
 
+    const outputS3Key = result?.outputS3Key;
+    console.log(`   Extracted outputS3Key: ${outputS3Key || 'NOT FOUND'}`);
+
     const updateData: any = { status: 'completed', progress: 100 };
     if (subtitleS3Key && subtitleS3Key.trim() !== '') {
       updateData.subtitleS3Key = subtitleS3Key;
@@ -129,6 +138,11 @@ export const setupQueueListeners = () => {
       console.warn(`   ⚠️  No valid subtitleS3Key found in returnvalue for job ${jobId}`);
       console.warn(`   Full returnvalue:`, JSON.stringify(returnvalue, null, 2));
       console.warn(`   Parsed result:`, JSON.stringify(result, null, 2));
+    }
+    
+    if (outputS3Key && outputS3Key.trim() !== '') {
+      updateData.outputS3Key = outputS3Key;
+      console.log(`   ✅ Updating video ${jobId} with outputS3Key: ${outputS3Key}`);
     }
 
     // Update the video in database
@@ -147,16 +161,18 @@ export const setupQueueListeners = () => {
         status: verifyVideo.status
       }, null, 2));
       
-      // Emit the completion event with the verified subtitleS3Key
+      // Emit the completion event with the verified subtitleS3Key and outputS3Key
       const finalSubtitleS3Key = verifyVideo.subtitleS3Key || subtitleS3Key;
-      console.log(`   📤 Emitting video-completed event with subtitleS3Key: ${finalSubtitleS3Key || 'NOT SET'}`);
-      io.emit('video-completed', { 
-        videoId: jobId, 
-        subtitleS3Key: finalSubtitleS3Key 
+      const finalOutputS3Key = verifyVideo.outputS3Key || outputS3Key;
+      console.log(`   📤 Emitting video-completed event with subtitleS3Key: ${finalSubtitleS3Key || 'NOT SET'}, outputS3Key: ${finalOutputS3Key || 'NOT SET'}`);
+      io.emit('video-completed', {
+        videoId: jobId,
+        subtitleS3Key: finalSubtitleS3Key,
+        outputS3Key: finalOutputS3Key ?? undefined,
       });
     } else {
       console.error(`   ❌ Video ${jobId} not found after update!`);
-      io.emit('video-completed', { videoId: jobId, subtitleS3Key: subtitleS3Key });
+      io.emit('video-completed', { videoId: jobId, subtitleS3Key: subtitleS3Key, outputS3Key: outputS3Key ?? undefined });
     }
     console.log('='.repeat(70));
   });
