@@ -51,8 +51,8 @@ aws_secret_access_key = bar
 To:
 ```
 [default]
-aws_access_key_id = AKIAQMLJCG7QOGUGS6DI
-aws_secret_access_key = vanP8/3MQde9kkZ+ZigEPlUVn8w9fU0AIU1DOs/N
+aws_access_key_id = YOUR_AWS_ACCESS_KEY
+aws_secret_access_key = YOUR_AWS_ACCESS_KEY
 ```
 
 **Note**: This makes `genio` the default profile for all AWS CLI commands.
