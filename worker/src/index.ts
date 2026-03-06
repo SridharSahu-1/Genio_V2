@@ -119,38 +119,13 @@ const hasUsername = !!connection.username;
 console.log(`🔗 Worker connecting to Redis at ${logHost}:${logPort}`);
 console.log(`   Queue name: video-processing`);
 console.log(`   Authentication: ${hasAuth ? '✅ Configured' : '❌ Not configured'}`);
+console.log(`   TLS: ${connection.tls ? 'enabled' : 'disabled'}`);
 if (hasUsername) {
   console.log(`   Username: ${connection.username}`);
 }
 if (hasPassword) {
   console.log(`   Password: ${'*'.repeat(Math.min(connection.password.length, 8))} (${connection.password.length} chars)`);
-} else {
-  console.log(`   ⚠️  WARNING: No password provided. Redis may require authentication.`);
-  console.log(`   Check REDIS_PASSWORD or REDIS_URL environment variable.`);
 }
-
-// Enable TLS for Upstash (rediss://) or if REDIS_TLS is set
-if (process.env.REDIS_URL?.startsWith('rediss://') || process.env.REDIS_TLS === 'true' || process.env.REDIS_TLS === '1') {
-  connection.tls = {};
-  console.log('🔒 Using TLS for Redis connection');
-}
-
-// Enable TLS for Upstash (rediss://) or if REDIS_TLS is set
-if (process.env.REDIS_URL?.startsWith('rediss://') || process.env.REDIS_TLS === 'true' || process.env.REDIS_TLS === '1') {
-  connection.tls = {};
-  console.log('🔒 Using TLS for Redis connection');
-}
-
-console.log(`🔗 Worker connecting to Redis at ${connection.host}:${connection.port}`);
-console.log(`   Queue name: video-processing`);
-// Debug: Log actual connection object (without password)
-console.log(`   Connection config:`, {
-  host: connection.host,
-  port: connection.port,
-  username: connection.username ? 'set' : 'not set',
-  password: connection.password ? 'set (' + connection.password.length + ' chars)' : 'not set',
-  tls: connection.tls ? 'enabled' : 'disabled'
-});
 
 const worker = new Worker(
   'video-processing',

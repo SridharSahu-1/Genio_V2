@@ -327,17 +327,18 @@ export const processVideo = async (job: Job) => {
     fs.copyFileSync(actualPath, originalVideoPath);
     console.log(`✅ Copied local file to temp directory: ${originalVideoPath}`);
     
-    // Trim video if trim parameters are provided
-    if (trimStart !== undefined && trimStart > 0) {
+    // Trim video if either start offset or end cutoff is specified
+    const shouldTrim = (trimStart !== undefined && trimStart > 0) || (trimEnd !== undefined && trimEnd > 0);
+    if (shouldTrim) {
       job.updateProgress(5);
-      console.log(`✂️  Trimming video: ${trimStart}s to ${trimEnd || 'end'}`);
+      console.log(`✂️  Trimming video: ${trimStart ?? 0}s to ${trimEnd || 'end'}`);
       localVideoPath = path.join(tempDir, `trimmed_${filename}`);
       
       const trimArgs = [
         '-i', originalVideoPath,
-        '-ss', trimStart.toString(),
-        ...(trimEnd !== undefined && trimEnd > 0 ? ['-t', (trimEnd - trimStart).toString()] : []),
-        '-c', 'copy', // Use stream copy for faster trimming
+        ...(trimStart !== undefined && trimStart > 0 ? ['-ss', trimStart.toString()] : []),
+        ...(trimEnd !== undefined && trimEnd > 0 ? ['-t', ((trimEnd - (trimStart || 0))).toString()] : []),
+        '-c', 'copy',
         '-avoid_negative_ts', 'make_zero',
         '-y',
         localVideoPath
@@ -372,7 +373,7 @@ export const processVideo = async (job: Job) => {
     
     job.updateProgress(10);
   } else {
-    // S3 PRESIGNED URL - Pass directly to Python script to download from S3
+    // S3 PRESIGNED URL - Download first, optionally trim, then process
     if (!videoUrl || typeof videoUrl !== 'string' || !videoUrl.startsWith('http')) {
       throw new Error(`Invalid or missing S3 presigned URL. videoUrl: ${videoUrl}.`);
     }
@@ -380,14 +381,72 @@ export const processVideo = async (job: Job) => {
     console.log('='.repeat(70));
     console.log('📥 USING S3 PRESIGNED URL');
     console.log('='.repeat(70));
-    console.log(`✅ Video will be fetched directly from S3 by Python script`);
     console.log(`   S3 presigned URL: ${videoUrl.substring(0, 80)}...`);
 
-    // Use unique filename for Python to save the downloaded file (prevents collisions)
     const baseName = path.basename(videoKey) || 'video';
     const uniqueId = videoId || docId || Date.now();
     const filename = `${uniqueId}_${baseName}`;
-    localVideoPath = path.join(tempDir, filename);
+    const downloadedPath = path.join(tempDir, `original_${filename}`);
+
+    // Download the video from S3 presigned URL
+    job.updateProgress(5);
+    console.log(`📥 Downloading video from S3 to: ${downloadedPath}`);
+    await new Promise<void>((resolve, reject) => {
+      const proto = videoUrl.startsWith('https') ? require('https') : require('http');
+      const file = fs.createWriteStream(downloadedPath);
+      proto.get(videoUrl, (response: any) => {
+        if (response.statusCode === 301 || response.statusCode === 302) {
+          proto.get(response.headers.location, (redirectRes: any) => {
+            redirectRes.pipe(file);
+            file.on('finish', () => { file.close(); resolve(); });
+          }).on('error', reject);
+          return;
+        }
+        if (response.statusCode !== 200) {
+          reject(new Error(`S3 download failed with status ${response.statusCode}`));
+          return;
+        }
+        response.pipe(file);
+        file.on('finish', () => { file.close(); resolve(); });
+      }).on('error', reject);
+    });
+
+    const dlSize = fs.statSync(downloadedPath).size;
+    console.log(`✅ Downloaded: ${dlSize} bytes`);
+
+    // Trim if needed
+    const shouldTrimS3 = (trimStart !== undefined && trimStart > 0) || (trimEnd !== undefined && trimEnd > 0);
+    if (shouldTrimS3) {
+      job.updateProgress(8);
+      console.log(`✂️  Trimming S3 video: ${trimStart ?? 0}s to ${trimEnd || 'end'}`);
+      localVideoPath = path.join(tempDir, `trimmed_${filename}`);
+
+      const trimArgs = [
+        '-i', downloadedPath,
+        ...(trimStart !== undefined && trimStart > 0 ? ['-ss', trimStart.toString()] : []),
+        ...(trimEnd !== undefined && trimEnd > 0 ? ['-t', ((trimEnd - (trimStart || 0))).toString()] : []),
+        '-c', 'copy',
+        '-avoid_negative_ts', 'make_zero',
+        '-y',
+        localVideoPath
+      ];
+
+      await new Promise<void>((resolve, reject) => {
+        const ffmpegProcess = spawn('ffmpeg', trimArgs);
+        ffmpegProcess.stderr.on('data', (data) => {
+          const output = data.toString();
+          if (output.includes('time=')) console.log(`FFmpeg trim: ${output.trim()}`);
+        });
+        ffmpegProcess.on('close', (code) => {
+          if (code !== 0) reject(new Error(`FFmpeg trim failed with code ${code}`));
+          else { console.log(`✅ Video trimmed: ${localVideoPath}`); resolve(); }
+        });
+        ffmpegProcess.on('error', (err) => reject(new Error(`FFmpeg trim error: ${err.message}`)));
+      });
+    } else {
+      localVideoPath = downloadedPath;
+    }
+
     job.updateProgress(10);
   }
 
@@ -405,27 +464,17 @@ export const processVideo = async (job: Job) => {
 
     let currentProgress = 0;
 
-    // Build Python command args
+    // Build Python command args - always use local file since we download/copy first
     const pythonArgs = [scriptPath];
-
-    if (isLocalFile) {
-      // Local file path - use downloaded/copied file directly
-      console.log(`📁 Using local file: ${localVideoPath}`);
-      pythonArgs.push('--input', localVideoPath);
-    } else {
-      // S3 presigned URL - Python will download directly from S3
-      console.log(`📁 Using S3 presigned URL (Python will download to: ${localVideoPath})`);
-      pythonArgs.push('--input_url', videoUrl!);
-      pythonArgs.push('--output_path', localVideoPath);
-    }
+    console.log(`📁 Using local file for Python: ${localVideoPath}`);
+    pythonArgs.push('--input', localVideoPath);
     pythonArgs.push('--token', hfToken);
     pythonArgs.push('--output_dir', tempDir);
     if (subtitleLanguage) {
       pythonArgs.push('--language', subtitleLanguage);
     }
 
-    const pyInputArg = isLocalFile ? `--input ${localVideoPath}` : `--input_url [S3_URL] --output_path ${localVideoPath}`;
-    console.log(`Python command: ${pythonCmd} ${scriptPath} ${pyInputArg} --token [TOKEN] --output_dir ${tempDir}`);
+    console.log(`Python command: ${pythonCmd} ${scriptPath} --input ${localVideoPath} --token [TOKEN] --output_dir ${tempDir}`);
     // Set environment variables for Python subprocess to match standalone execution
     const pythonEnv = {
       ...process.env,

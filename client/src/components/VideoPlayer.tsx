@@ -27,10 +27,23 @@ interface VideoPlayerProps {
   onClose?: () => void;
 }
 
+const parseAssTime = (timeStr: string): number => {
+  const parts = timeStr.split(':');
+  if (parts.length === 3) {
+    const hours = parseInt(parts[0], 10);
+    const minutes = parseInt(parts[1], 10);
+    const secondsParts = parts[2].split('.');
+    const seconds = parseInt(secondsParts[0], 10);
+    const centiseconds = parseInt(secondsParts[1] || '0', 10);
+    return hours * 3600 + minutes * 60 + seconds + centiseconds / 100;
+  }
+  return 0;
+};
+
 export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [subtitlesEnabled, setSubtitlesEnabled] = useState(false);
+  const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
   const [subtitleText, setSubtitleText] = useState<string>('');
   const [subtitleData, setSubtitleData] = useState<any[]>([]);
   const [subtitleLoaded, setSubtitleLoaded] = useState(false);
@@ -107,9 +120,8 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
               const wordsWithTiming: Array<{ word: string, start: number, end: number }> = [];
               let currentTime = startSeconds;
 
-              // Find all {\k{value}} tags with their positions
               const kTagMatches: Array<{ index: number, centiseconds: number, endIndex: number }> = [];
-              const kTagRegex = /\{k(\d+)\}/g;
+              const kTagRegex = /\{\\?k(\d+)\}/g;
               let match;
 
               while ((match = kTagRegex.exec(cleanText)) !== null) {
@@ -363,19 +375,6 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [volume, hasSubtitles, subtitlesEnabled]);
 
-  const parseAssTime = (timeStr: string): number => {
-    const parts = timeStr.split(':');
-    if (parts.length === 3) {
-      const hours = parseInt(parts[0], 10);
-      const minutes = parseInt(parts[1], 10);
-      const secondsParts = parts[2].split('.');
-      const seconds = parseInt(secondsParts[0], 10);
-      const centiseconds = parseInt(secondsParts[1] || '0', 10);
-      return hours * 3600 + minutes * 60 + seconds + centiseconds / 100;
-    }
-    return 0;
-  };
-
   const formatTime = (seconds: number): string => {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
@@ -533,12 +532,11 @@ export default function VideoPlayer({ videoUrl, subtitleUrl, title, onClose }: V
           >
             <video
               ref={videoRef}
+              src={videoUrl}
               className="absolute top-0 left-0 w-full h-full"
               onClick={togglePlay}
-            >
-              <source src={videoUrl} type="video/mp4" />
-              Your browser does not support the video tag.
-            </video>
+              playsInline
+            />
 
             {/* Subtitles Overlay */}
             <AnimatePresence>

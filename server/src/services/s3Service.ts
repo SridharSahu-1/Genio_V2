@@ -54,9 +54,13 @@ export const ensureBucketExists = async (): Promise<void> => {
       console.error(`❌ ${message}`);
       throw new Error(message);
     } else if (errorName === 'Forbidden' || statusCode === 403) {
-      const message = `Access forbidden to bucket '${bucket}'. Check your AWS credentials and bucket permissions.`;
-      console.error(`❌ ${message}`);
-      throw new Error(message);
+      // Some AWS accounts / IAM roles don't have permission for HeadBucket
+      // but can still PutObject/GetObject for the bucket. In that case we
+      // don't want to treat this as a hard error - just log a warning and
+      // let subsequent S3 calls surface any real permission problems.
+      const message = `HeadBucket access forbidden for bucket '${bucket}'. This usually means the IAM user is missing s3:HeadBucket, but PutObject/GetObject may still work.`;
+      console.warn(`⚠️  ${message}`);
+      return;
     } else {
       const message = `Error checking bucket '${bucket}': ${error.message || errorName}`;
       console.error(`❌ ${message}`);
